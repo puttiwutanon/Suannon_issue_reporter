@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+python-multipart
+cloudinary
+psycopg2-binary
+python-dotenv

@@ -1,0 +1,4 @@
+start server: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+start client: npm run dev
+start venv: .\.venv\Scripts\Activate.ps1
+ssh -R 80:localhost:5173 localhost.run
