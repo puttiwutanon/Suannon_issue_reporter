@@ -9,6 +9,7 @@ export default function IssueFormASAP({ profile }) {
   const [location, setLocation] = useState({ lat: null, lng: null });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+  const [mode, setMode] = useState('form_urgent');
 
   useEffect(() => {
     if (navigator.geolocation) {

@@ -6,6 +6,6 @@ export default defineConfig({
   plugins: [react()],
     server: {
     host: true,
-    allowedHosts:  ['pamphlet-manmade-abridge.ngrok-free.dev', '.lhr.life', 'all'],
+    allowedHosts:  ['pamphlet-manmade-abridge.ngrok-free.dev', '.lhr.life', '.trycloudflare.com', 'all'],
   }
 })
