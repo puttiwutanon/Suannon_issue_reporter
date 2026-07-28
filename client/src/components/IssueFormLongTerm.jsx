@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import liff from '@line/liff';
+import './styles/IssueFormLongTermStyle.scss';
 
 export default function IssueFormLongTerm({ profile }) {
   const [firstName, setFirstName] = useState('');
@@ -29,7 +30,7 @@ export default function IssueFormLongTerm({ profile }) {
     const formData = new FormData();
     formData.append('lineUserId', profile.userId);
     formData.append('reporterName', `${firstName} ${lastName}`);
-    formData.append('category', 'Suggestion');  // fixed category for suggestions
+    formData.append('category', 'Suggestion');
     formData.append('description', message);
     formData.append('studentYear', year);
     formData.append('studentClass', studentClass);
@@ -61,91 +62,91 @@ export default function IssueFormLongTerm({ profile }) {
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h2 style={styles.title}>📝 เสนอแนะเพื่อปรับปรุงโรงเรียน</h2>
+    <div className="container">
+      <div className="card">
+        <h2 className="title">📝 เสนอแนะเพื่อปรับปรุงโรงเรียน</h2>
         <form onSubmit={handleSubmit}>
-          <div style={styles.row}>
-            <div style={{ flex: 1, marginRight: 8 }}>
-              <label style={styles.label}>ชื่อ</label>
+          <div className="row">
+            <div className="col">
+              <label className="label">ชื่อ</label>
               <input
                 type="text"
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
                 required
-                style={styles.input}
+                className="input"
                 placeholder="ชื่อ"
               />
             </div>
-            <div style={{ flex: 1, marginLeft: 8 }}>
-              <label style={styles.label}>นามสกุล</label>
+            <div className="col">
+              <label className="label">นามสกุล</label>
               <input
                 type="text"
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
                 required
-                style={styles.input}
+                className="input"
                 placeholder="นามสกุล"
               />
             </div>
           </div>
 
-          <div style={styles.row}>
-            <div style={{ flex: 1, marginRight: 8 }}>
-              <label style={styles.label}>ชั้นปี</label>
+          <div className="row">
+            <div className="col">
+              <label className="label">ชั้นปี</label>
               <input
                 type="text"
                 value={year}
                 onChange={(e) => setYear(e.target.value)}
                 required
-                style={styles.input}
+                className="input"
                 placeholder="เช่น ม.4"
               />
             </div>
-            <div style={{ flex: 1, marginLeft: 8 }}>
-              <label style={styles.label}>ห้อง</label>
+            <div className="col">
+              <label className="label">ห้อง</label>
               <input
                 type="text"
                 value={studentClass}
                 onChange={(e) => setStudentClass(e.target.value)}
                 required
-                style={styles.input}
+                className="input"
                 placeholder="เช่น 5"
               />
             </div>
-            <div style={{ flex: 0.7, marginLeft: 8 }}>
-              <label style={styles.label}>เลขที่</label>
+            <div className="col small">
+              <label className="label">เลขที่</label>
               <input
                 type="text"
                 value={studentNumber}
                 onChange={(e) => setStudentNumber(e.target.value)}
                 required
-                style={styles.input}
+                className="input"
                 placeholder="เลขที่"
               />
             </div>
           </div>
 
-          <div style={styles.field}>
-            <label style={styles.label}>ข้อเสนอแนะ / เรื่องที่ต้องการแจ้ง</label>
+          <div className="field">
+            <label className="label">ข้อเสนอแนะ / เรื่องที่ต้องการแจ้ง</label>
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               required
               rows={4}
-              style={{ ...styles.input, resize: 'vertical' }}
+              className="input textarea"
               placeholder="เขียนข้อเสนอแนะหรือเรื่องที่อยากบอกสภานักเรียน..."
             />
           </div>
 
-          <div style={styles.field}>
-            <label style={styles.label}>แนบภาพประกอบ (ถ้ามี)</label>
-            <label style={styles.uploadArea}>
+          <div className="field">
+            <label className="label">แนบภาพประกอบ (ถ้ามี)</label>
+            <label className="upload-area">
               {previewUrl ? (
-                <img src={previewUrl} alt="Preview" style={styles.previewImage} />
+                <img src={previewUrl} alt="Preview" className="preview-image" />
               ) : (
-                <div style={styles.uploadPlaceholder}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>📷</div>
+                <div className="upload-placeholder">
+                  <div className="icon">📷</div>
                   แตะเพื่อแนบภาพ
                 </div>
               )}
@@ -156,33 +157,14 @@ export default function IssueFormLongTerm({ profile }) {
           <button
             type="submit"
             disabled={isSubmitting}
-            style={{
-              ...styles.submitButton,
-              backgroundColor: isSubmitting ? '#9CA3AF' : '#06C755',
-            }}
+            className={`submit-btn ${isSubmitting ? 'disabled' : 'default'}`}
           >
             {isSubmitting ? 'กำลังส่ง...' : 'ส่งข้อเสนอแนะ'}
           </button>
         </form>
 
-        {statusMsg && <p style={styles.statusMsg}>{statusMsg}</p>}
+        {statusMsg && <p className="status-msg">{statusMsg}</p>}
       </div>
     </div>
   );
 }
-
-// ---------- Styles ----------
-const styles = {
-  container: { backgroundColor: '#F3F4F6', minHeight: '100vh', padding: '16px', fontFamily: 'sans-serif' },
-  card: { maxWidth: '400px', margin: '0 auto', backgroundColor: '#FFF', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' },
-  title: { textAlign: 'center', margin: '0 0 16px 0', color: '#111827', fontSize: '22px' },
-  row: { display: 'flex', marginBottom: '12px' },
-  field: { marginBottom: '16px' },
-  label: { display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: 'bold', color: '#374151' },
-  input: { width: '100%', padding: '10px', border: '1px solid #D1D5DB', borderRadius: '8px', fontSize: '15px', backgroundColor: '#F9FAFB', boxSizing: 'border-box' },
-  uploadArea: { display: 'block', width: '100%', border: '2px dashed #D1D5DB', borderRadius: '8px', textAlign: 'center', cursor: 'pointer', backgroundColor: '#F9FAFB', overflow: 'hidden' },
-  uploadPlaceholder: { padding: '30px 0', color: '#6B7280' },
-  previewImage: { width: '100%', height: '200px', objectFit: 'cover' },
-  submitButton: { width: '100%', padding: '14px', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 4px rgba(6, 199, 85, 0.2)' },
-  statusMsg: { textAlign: 'center', marginTop: '16px', color: '#374151', fontWeight: 'bold' },
-};

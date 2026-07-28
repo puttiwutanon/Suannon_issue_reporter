@@ -1,0 +1,139 @@
+// IssueFormASAPStyle.scss
+.container {
+  background-color: #F3F4F6;
+  min-height: 100vh;
+  padding: 16px;
+  font-family: sans-serif;
+}
+
+.card {
+  max-width: 400px;
+  margin: 0 auto;
+  background-color: #FFFFFF;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+.title {
+  text-align: center;
+  margin: 0 0 16px 0;
+  color: #111827;
+  font-size: 22px;
+}
+
+.reporter {
+  text-align: center;
+  margin-bottom: 20px;
+  font-size: 14px;
+  color: #6B7280;
+  strong {
+    color: #1F2937;
+  }
+}
+
+.field {
+  margin-bottom: 16px;
+}
+
+.label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: bold;
+  color: #374151;
+}
+
+.input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #D1D5DB;
+  border-radius: 8px;
+  font-size: 15px;
+  background-color: #F9FAFB;
+  box-sizing: border-box;
+  &:focus {
+    outline: 2px solid #06C755;
+    border-color: transparent;
+  }
+}
+
+.textarea {
+  resize: none;
+}
+
+.upload-area {
+  display: block;
+  width: 100%;
+  border: 2px dashed #D1D5DB;
+  border-radius: 8px;
+  text-align: center;
+  cursor: pointer;
+  background-color: #F9FAFB;
+  box-sizing: border-box;
+  overflow: hidden;
+  transition: border-color 0.2s;
+  &:hover {
+    border-color: #06C755;
+  }
+}
+
+.upload-placeholder {
+  padding: 40px 0;
+  color: #6B7280;
+  .icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+  }
+}
+
+.preview-image {
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+}
+
+.location-box {
+  margin-bottom: 24px;
+  padding: 12px;
+  background-color: #F9FAFB;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #4B5563;
+  display: flex;
+  align-items: center;
+  .pin {
+    font-size: 18px;
+    margin-right: 8px;
+  }
+}
+
+.submit-btn {
+  width: 100%;
+  padding: 14px;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(6, 199, 85, 0.2);
+  transition: background-color 0.2s;
+  &.default {
+    background-color: #06C755;
+    &:hover {
+      background-color: #05a64a;
+    }
+  }
+  &.disabled {
+    background-color: #9CA3AF;
+    cursor: not-allowed;
+  }
+}
+
+.status-msg {
+  text-align: center;
+  margin-top: 16px;
+  color: #374151;
+  font-weight: bold;
+}
