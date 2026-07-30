@@ -35,12 +35,16 @@ export default function IssueFormLongTerm({ profile }) {
     formData.append('studentYear', year);
     formData.append('studentClass', studentClass);
     formData.append('studentNumber', studentNumber);
+    formData.append('issue_type', 'suggestion');
     if (file) formData.append('image', file);
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const res = await fetch(`${apiUrl}/api/issues`, {
         method: 'POST',
+        headers: {
+          'ngrok-skip-browser-warning': 'true'
+        },
         body: formData,
       });
 
@@ -147,10 +151,16 @@ export default function IssueFormLongTerm({ profile }) {
               ) : (
                 <div className="upload-placeholder">
                   <div className="icon">📷</div>
-                  แตะเพื่อแนบภาพ
+                  แตะเพื่อถ่ายรูป
                 </div>
               )}
-              <input type="file" accept="image/*" onChange={handleImageChange} style={{ display: 'none' }} />
+              <input 
+                type="file" 
+                accept="image/*" 
+                capture="environment"   // <-- Forces camera, no gallery
+                onChange={handleImageChange} 
+                style={{ display: 'none' }} 
+              />
             </label>
           </div>
 

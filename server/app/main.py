@@ -1,4 +1,5 @@
 import os
+import logging
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status, Request, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,14 @@ from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage,
     QuickReply, QuickReplyButton, URIAction
 )
+
+# ---------- Setup Logging ----------
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -36,9 +45,12 @@ cloudinary.config(
 # Database helper
 def get_db_connection():
     try:
-        return psycopg2.connect(os.getenv("DATABASE_URL"))
+        logger.info("🔄 Connecting to database...")
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        logger.info("✅ Database connected successfully")
+        return conn
     except Exception as e:
-        print("Database connection error:", e)
+        logger.error(f"❌ Database connection error: {e}")
         raise HTTPException(status_code=500, detail="Database connection failure")
 
 
@@ -47,22 +59,25 @@ def get_db_connection():
 async def get_issues(
     user_id: Optional[str] = Query(None, description="Filter by LINE user ID")
 ):
+    logger.info(f"📥 GET /api/issues - user_id: {user_id}")
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
         if user_id:
+            logger.info(f"🔍 Fetching issues for user: {user_id}")
             query = "SELECT * FROM issues WHERE line_user_id = %s ORDER BY created_at DESC"
             cursor.execute(query, (user_id,))
         else:
+            logger.info("📋 Fetching all issues")
             query = "SELECT * FROM issues ORDER BY created_at DESC"
             cursor.execute(query)
 
         rows = cursor.fetchall()
+        logger.info(f"✅ Found {len(rows)} issues")
         cursor.close()
         conn.close()
 
-        # Convert rows to dict list
         issues = []
         for row in rows:
             issues.append({
@@ -79,14 +94,19 @@ async def get_issues(
                 "studentYear": row[10] if len(row) > 10 else None,
                 "studentClass": row[11] if len(row) > 11 else None,
                 "studentNumber": row[12] if len(row) > 12 else None,
+                "issueType": row[13] if len(row) > 13 else None,
             })
+        
+        logger.info(f"📤 Returning {len(issues)} issues")
         return {"success": True, "issues": issues}
     except Exception as e:
-        print("GET error:", e)
+        logger.error(f"❌ GET error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ---------- POST /api/issues (extended for student details) ----------
+# ---------- POST /api/issues ----------
+line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
+
 @app.post("/api/issues", status_code=status.HTTP_201_CREATED)
 async def create_issue(
     lineUserId: str = Form(...),
@@ -99,18 +119,25 @@ async def create_issue(
     studentYear: Optional[str] = Form(None),
     studentClass: Optional[str] = Form(None),
     studentNumber: Optional[str] = Form(None),
+    issue_type: Optional[str] = Form('urgent'),
 ):
+    logger.info(f"📝 POST /api/issues - User: {lineUserId}, Type: {issue_type}, Category: {category}")
+    logger.info(f"📝 Reporter: {reporterName}, Description length: {len(description) if description else 0}")
+    logger.info(f"📝 Student: {studentYear}/{studentClass}/{studentNumber}")
+    
     image_url = None
 
     if image:
         try:
+            logger.info(f"📤 Uploading image to Cloudinary: {image.filename}")
             upload_result = cloudinary.uploader.upload(
                 image.file,
                 folder="school_issues"
             )
             image_url = upload_result.get("secure_url")
+            logger.info(f"✅ Image uploaded: {image_url}")
         except Exception as e:
-            print("Cloudinary error:", e)
+            logger.error(f"❌ Cloudinary error: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to upload image")
 
     try:
@@ -120,21 +147,42 @@ async def create_issue(
         query = """
             INSERT INTO issues 
             (line_user_id, reporter_name, category, description, image_url, 
-             latitude, longitude, student_year, student_class, student_number)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             latitude, longitude, student_year, student_class, student_number, issue_type)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, line_user_id, reporter_name, category, description, 
                       image_url, latitude, longitude, status, created_at,
-                      student_year, student_class, student_number;
+                      student_year, student_class, student_number, issue_type;
         """
         values = (
             lineUserId, reporterName, category, description, image_url,
-            latitude, longitude, studentYear, studentClass, studentNumber
+            latitude, longitude, studentYear, studentClass, studentNumber,
+            issue_type
         )
+        
+        logger.info(f"💾 Inserting issue into database...")
         cursor.execute(query, values)
         new_row = cursor.fetchone()
         conn.commit()
+        logger.info(f"✅ Issue inserted with ID: {new_row[0]}")
         cursor.close()
         conn.close()
+
+        # -------- Send LINE confirmation message --------
+        try:
+            if issue_type == 'suggestion':
+                msg_text = "✅ ส่งข้อเสนอแนะสำเร็จแล้ว!\nขอบคุณที่ช่วยพัฒนาโรงเรียนของเรา 🙏"
+            else:
+                msg_text = "✅ แจ้งปัญหาสำเร็จแล้ว!\nทีมงานจะรีบดำเนินการต่อไป 🛠️"
+            
+            logger.info(f"📤 Sending LINE confirmation to: {lineUserId}")
+            line_bot_api.push_message(
+                to=lineUserId,
+                messages=TextSendMessage(text=msg_text)
+            )
+            logger.info("✅ LINE confirmation sent")
+        except Exception as e:
+            logger.error(f"❌ LINE push error: {e}", exc_info=True)
+            # Don't fail the request if push fails
 
         return {
             "success": True,
@@ -152,31 +200,37 @@ async def create_issue(
                 "studentYear": new_row[10],
                 "studentClass": new_row[11],
                 "studentNumber": new_row[12],
+                "issueType": new_row[13],
             }
         }
     except Exception as e:
-        print("Database error:", e)
+        logger.error(f"❌ Database error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Database insertion error: {str(e)}")
 
 
 # ---------- LINE Bot Webhook ----------
-line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
 @app.post("/webhook")
 async def line_webhook(request: Request, x_line_signature: str = Header(None)):
+    logger.info("📨 Webhook received")
     body = await request.body()
     try:
         handler.handle(body.decode("utf-8"), x_line_signature)
+        logger.info("✅ Webhook handled successfully")
     except InvalidSignatureError:
+        logger.error("❌ Invalid signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
     return "OK"
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_text = event.message.text.strip()
+    user_id = event.source.user_id
+    logger.info(f"💬 Message from {user_id}: {user_text}")
 
     if user_text == "ผู้ใช้ใหม่":
+        logger.info(f"📖 Tutorial requested by {user_id}")
         tutorial_text = (
             "📌 **วิธีใช้งานระบบแจ้งปัญหา**\n\n"
             "1. กดปุ่ม 'แจ้งเรื่องใหม่' ที่เมนูด้านล่าง\n"
@@ -188,6 +242,7 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=tutorial_text))
 
     elif user_text == "ดูเรื่องแจ้ง":
+        logger.info(f"👀 View reports requested by {user_id}")
         quick_reply = QuickReply(
             items=[
                 QuickReplyButton(
@@ -217,6 +272,7 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, msg)
 
     elif user_text == "แจ้งเรื่องใหม่":
+        logger.info(f"📝 New report requested by {user_id}")
         quick_reply = QuickReply(
             items=[
                 QuickReplyButton(
@@ -244,3 +300,9 @@ def handle_message(event):
             quick_reply=quick_reply
         )
         line_bot_api.reply_message(event.reply_token, msg)
+    
+    else:
+        logger.info(f"❓ Unknown command: {user_text} from {user_id}")
+        # Optional: reply with help message
+        help_text = "พิมพ์ 'ผู้ใช้ใหม่' เพื่อดูวิธีการใช้งาน\nพิมพ์ 'แจ้งเรื่องใหม่' เพื่อแจ้งปัญหา\nพิมพ์ 'ดูเรื่องแจ้ง' เพื่อดูรายการที่แจ้ง"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_text))

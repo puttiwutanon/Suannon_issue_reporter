@@ -4,6 +4,7 @@ import './styles/IssueFormASAPStyle.scss';
 
 export default function IssueFormASAP({ profile }) {
   const [category, setCategory] = useState('Facilities');
+  const [locationDetail, setLocationDetail] = useState('');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -37,8 +38,10 @@ export default function IssueFormASAP({ profile }) {
     formData.append('lineUserId', profile.userId);
     formData.append('reporterName', profile.displayName);
     formData.append('category', category);
-    formData.append('description', description);
-    
+    const fullDescription = `สถานที่: ${locationDetail}\nรายละเอียด: ${description}`;
+    formData.append('description', fullDescription);
+    formData.append('issue_type', 'urgent');
+
     if (location.lat) formData.append('latitude', location.lat);
     if (location.lng) formData.append('longitude', location.lng);
     if (file) formData.append('image', file);
@@ -47,6 +50,9 @@ export default function IssueFormASAP({ profile }) {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const res = await fetch(`${apiUrl}/api/issues`, {
         method: 'POST',
+        headers: {
+          'ngrok-skip-browser-warning': 'true'
+        },
         body: formData,
       });
 
@@ -93,10 +99,10 @@ export default function IssueFormASAP({ profile }) {
           <div className="field">
             <label className="label">สถานที่ที่พบปัญหา</label>
             <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              value={locationDetail}
+              onChange={(e) => setLocationDetail(e.target.value)}
               required
-              rows={3}
+              rows={2}
               className="input textarea"
               placeholder="ระบุสถานที่หรือห้องที่พบปัญหา เช่น ห้อง10402, ห้องน้ำชายตึก10 ชั้น 5..."
             />
@@ -122,10 +128,16 @@ export default function IssueFormASAP({ profile }) {
               ) : (
                 <div className="upload-placeholder">
                   <div className="icon">📷</div>
-                  แตะเพื่อถ่ายรูปหรือเลือกไฟล์
+                  แตะเพื่อถ่ายรูป
                 </div>
               )}
-              <input type="file" accept="image/*" onChange={handleImageChange} style={{ display: 'none' }} />
+              <input 
+                type="file" 
+                accept="image/*" 
+                capture="environment"   // <-- Forces camera, no gallery
+                onChange={handleImageChange} 
+                style={{ display: 'none' }} 
+              />
             </label>
           </div>
 
