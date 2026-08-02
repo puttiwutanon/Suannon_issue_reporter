@@ -189,34 +189,6 @@ export default function IssueCheck({ profile, viewMode }) {
             </div>
           ))}
 
-          {/* ---------- DEBUG TABLE ---------- */}
-          <div style={{ marginTop: 24, overflowX: 'auto' }}>
-            <h3 style={{ fontSize: 16, color: '#374151', marginBottom: 8 }}>📋 ข้อมูลทั้งหมด (สำหรับตรวจสอบ)</h3>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, backgroundColor: '#FFF', borderRadius: 8 }}>
-              <thead>
-                <tr style={{ backgroundColor: '#E5E7EB' }}>
-                  <th style={tableHeader}>ID</th>
-                  <th style={tableHeader}>ผู้แจ้ง</th>
-                  <th style={tableHeader}>ประเภท</th>
-                  <th style={tableHeader}>รายละเอียด</th>
-                  <th style={tableHeader}>สถานะ</th>
-                  <th style={tableHeader}>วันที่</th>
-                </tr>
-              </thead>
-              <tbody>
-                {issues.map(issue => (
-                  <tr key={issue.id} style={{ borderBottom: '1px solid #E5E7EB' }}>
-                    <td style={tableCell}>{issue.id}</td>
-                    <td style={tableCell}>{issue.reporterName}</td>
-                    <td style={tableCell}>{issue.category}</td>
-                    <td style={tableCell}>{issue.description?.substring(0, 30)}...</td>
-                    <td style={tableCell}>{issue.status}</td>
-                    <td style={tableCell}>{new Date(issue.createdAt).toLocaleDateString('th-TH')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </>
       )}
     </div>
