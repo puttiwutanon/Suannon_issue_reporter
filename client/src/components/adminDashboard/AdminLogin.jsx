@@ -36,7 +36,7 @@ function AdminLogin() {
     <div className="admin-login-container">
       <div className="login-card">
         <div className="login-header">
-          <div className="logo">🏫</div>
+          <div className="logo"><img src="/src/assets/skn_1 (2).png" alt="" width="150" height="150" /></div>
           <h1>SKN Issue Reporter</h1>
           <p>แผงควบคุมผู้ดูแลระบบ</p>
         </div>
