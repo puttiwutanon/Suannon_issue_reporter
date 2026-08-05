@@ -10,9 +10,12 @@ from dotenv import load_dotenv
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage,
+    MessageEvent, TextMessage, TextSendMessage, ImageSendMessage,  
     QuickReply, QuickReplyButton, URIAction
 )
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from datetime import datetime, timedelta
 
 # ---------- Setup Logging ----------
 logging.basicConfig(
@@ -95,12 +98,97 @@ async def get_issues(
                 "studentClass": row[11] if len(row) > 11 else None,
                 "studentNumber": row[12] if len(row) > 12 else None,
                 "issueType": row[13] if len(row) > 13 else None,
+                "fixImageUrl": row[14] if len(row) > 14 else None,
+                "resolvedAt": str(row[15]) if len(row) > 15 and row[15] else None,
             })
         
         logger.info(f"📤 Returning {len(issues)} issues")
         return {"success": True, "issues": issues}
     except Exception as e:
         logger.error(f"❌ GET error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------- POST /api/issues/{issue_id}/resolve ----------
+@app.post("/api/issues/{issue_id}/resolve", status_code=status.HTTP_200_OK)
+async def resolve_issue(
+    issue_id: int,
+    fix_image: UploadFile = File(...),
+):
+    logger.info(f"🔧 Resolving issue ID: {issue_id}")
+    
+    # Upload fix image to Cloudinary
+    try:
+        logger.info(f"📤 Uploading fix image to Cloudinary: {fix_image.filename}")
+        upload_result = cloudinary.uploader.upload(
+            fix_image.file,
+            folder="school_issues/fixed"
+        )
+        fix_image_url = upload_result.get("secure_url")
+        logger.info(f"✅ Fix image uploaded: {fix_image_url}")
+    except Exception as e:
+        logger.error(f"❌ Cloudinary error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to upload fix image")
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Update issue: set status = 'resolved', fix_image_url, resolved_at
+        query = """
+            UPDATE issues 
+            SET status = 'resolved', 
+                fix_image_url = %s, 
+                resolved_at = NOW()
+            WHERE id = %s
+            RETURNING line_user_id, reporter_name, category, description;
+        """
+        cursor.execute(query, (fix_image_url, issue_id))
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="Issue not found")
+        
+        line_user_id, reporter_name, category, description = result
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        # -------- Send LINE notification with image --------
+        try:
+            line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
+            
+            # Text message
+            text_msg = TextSendMessage(
+                text=(
+                    f"✅ เรื่องแจ้งของคุณได้รับการแก้ไขแล้ว!\n\n"
+                    f"📋 ประเภท: {category}\n"
+                    f"📝 รายละเอียด: {description}\n\n"
+                    f"ขอบคุณที่ช่วยทำให้โรงเรียนของเราดีขึ้นครับ 🙏"
+                )
+            )
+            
+            # Image message – send the fix photo directly
+            image_msg = ImageSendMessage(
+                original_content_url=fix_image_url,
+                preview_image_url=fix_image_url
+            )
+            
+            # Send both as a multi-message (text + image)
+            line_bot_api.push_message(
+                to=line_user_id,
+                messages=[text_msg, image_msg]
+            )
+            logger.info(f"✅ LINE notification with image sent to {line_user_id}")
+        except Exception as e:
+            logger.error(f"❌ LINE push error: {e}", exc_info=True)
+
+        return {
+            "success": True,
+            "message": "Issue resolved and notification sent",
+            "fixImageUrl": fix_image_url
+        }
+    except Exception as e:
+        logger.error(f"❌ Resolve error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -306,3 +394,44 @@ def handle_message(event):
         # Optional: reply with help message
         help_text = "พิมพ์ 'ผู้ใช้ใหม่' เพื่อดูวิธีการใช้งาน\nพิมพ์ 'แจ้งเรื่องใหม่' เพื่อแจ้งปัญหา\nพิมพ์ 'ดูเรื่องแจ้ง' เพื่อดูรายการที่แจ้ง"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_text))
+
+
+def delete_old_resolved_issues():
+    """ลบรายการปัญหาที่แก้ไขแล้ว (status='resolved') ที่เก่ากว่า 4 วัน"""
+    logger.info("🧹 Running scheduled cleanup: deleting old resolved issues")
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # Delete issues where status='resolved' and resolved_at < now - 4 days
+        query = """
+            DELETE FROM issues 
+            WHERE status = 'resolved' 
+              AND resolved_at < NOW() - INTERVAL '4 days'
+            RETURNING id;
+        """
+        cursor.execute(query)
+        deleted = cursor.fetchall()
+        conn.commit()
+        cursor.close()
+        conn.close()
+        if deleted:
+            logger.info(f"🗑️ Deleted {len(deleted)} old resolved issues")
+        else:
+            logger.info("✅ No old resolved issues to delete")
+    except Exception as e:
+        logger.error(f"❌ Cleanup error: {e}", exc_info=True)
+
+# Schedule the job to run daily at 3:00 AM
+scheduler = BackgroundScheduler()
+scheduler.add_job(
+    delete_old_resolved_issues,
+    trigger=CronTrigger(hour=3, minute=0),
+    id="cleanup_resolved_issues",
+    replace_existing=True
+)
+scheduler.start()
+
+# Shutdown scheduler on app exit
+@app.on_event("shutdown")
+def shutdown_scheduler():
+    scheduler.shutdown()

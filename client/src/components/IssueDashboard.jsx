@@ -130,6 +130,11 @@ function IssueDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [mapKey, setMapKey] = useState(Date.now());
   const navigate = useNavigate();
+  const [showFixModal, setShowFixModal] = useState(false);
+  const [selectedIssueId, setSelectedIssueId] = useState(null);
+  const [fixFile, setFixFile] = useState(null);
+  const [fixPreview, setFixPreview] = useState(null);
+  const [fixing, setFixing] = useState(false);
 
   const handleLogout = useCallback(async () => {
     if (window.confirm('คุณต้องการออกจากระบบใช่หรือไม่?')) {
@@ -142,6 +147,52 @@ function IssueDashboard() {
       }
     }
   }, [navigate]);
+
+  const handleFixImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setFixFile(file);
+      setFixPreview(URL.createObjectURL(file));
+    }
+  };
+
+  const handleSubmitFix = async () => {
+    if (!fixFile) {
+      alert('กรุณาเลือกรูปภาพ');
+      return;
+    }
+    setFixing(true);
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const formData = new FormData();
+      formData.append('fix_image', fixFile);
+
+      const res = await fetch(`${apiUrl}/api/issues/${selectedIssueId}/resolve`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'ngrok-skip-browser-warning': 'true',
+        },
+      });
+      if (!res.ok) throw new Error('Failed to resolve issue');
+      const data = await res.json();
+      if (data.success) {
+        alert('✅ แจ้งว่าซ่อมแล้วสำเร็จ!');
+        setShowFixModal(false);
+        setFixFile(null);
+        setFixPreview(null);
+        setSelectedIssueId(null);
+        fetchIssues(); // Refresh list
+      } else {
+        alert('❌ เกิดข้อผิดพลาด');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('❌ ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์');
+    } finally {
+      setFixing(false);
+    }
+  };
 
   const fetchIssues = useCallback(async () => {
     try {
@@ -414,13 +465,25 @@ function IssueDashboard() {
                 {issue.latitude && (
                   <span className="location">📍 มีตำแหน่งที่ตั้ง</span>
                 )}
+
+                {issue.status === 'pending' && (
+                  <button 
+                    className="fix-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedIssueId(issue.id);
+                      setShowFixModal(true);
+                    }}
+                  >
+                    🔧 แจ้งว่าซ่อมแล้ว
+                  </button>
+                )}
               </div>
             </div>
           ))
         )}
       </div>
 
-      {/* Selected Issue Modal */}
       {selectedIssue && (
         <div className="modal-overlay" onClick={() => setSelectedIssue(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -440,6 +503,63 @@ function IssueDashboard() {
             {selectedIssue.imageUrl && (
               <img src={selectedIssue.imageUrl} alt="Issue" className="modal-image" />
             )}
+          </div>
+        </div>
+      )}
+
+      {showFixModal && (
+        <div className="modal-overlay" onClick={() => setShowFixModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowFixModal(false)}>✕</button>
+            <h3>📸 แจ้งว่าซ่อมแล้ว</h3>
+            <p>อัปโหลดภาพหลังซ่อม (ถ่ายรูปใหม่เท่านั้น)</p>
+            <label 
+              htmlFor="fixFileInput" 
+              className="upload-area" 
+              style={{ 
+                border: '2px dashed #D1D5DB', 
+                borderRadius: '8px', 
+                padding: '20px', 
+                textAlign: 'center', 
+                cursor: 'pointer',
+                display: 'block'
+              }}
+            >
+              {fixPreview ? (
+                <img src={fixPreview} alt="Preview" style={{ maxWidth: '100%', maxHeight: '200px' }} />
+              ) : (
+                <>
+                  <div style={{ fontSize: '40px' }}>📷</div>
+                  <p>แตะเพื่อถ่ายรูปหรือเลือกไฟล์</p>
+                </>
+              )}
+              <input 
+                type="file" 
+                accept="image/*" 
+                capture="environment" 
+                onChange={handleFixImageChange} 
+                style={{ display: 'none' }}
+                id="fixFileInput"
+              />
+            </label>
+            <button 
+              onClick={handleSubmitFix} 
+              disabled={fixing || !fixFile}
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: fixing ? '#9CA3AF' : '#06C755',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '16px',
+                fontWeight: 'bold',
+                cursor: fixing ? 'not-allowed' : 'pointer',
+                marginTop: '12px'
+              }}
+            >
+              {fixing ? 'กำลังส่ง...' : 'ยืนยันการซ่อม'}
+            </button>
           </div>
         </div>
       )}

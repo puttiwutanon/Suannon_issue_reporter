@@ -432,4 +432,19 @@
 }
 .logout-btn:hover {
   background: #DC2626;
+}
+
+.fix-btn {
+  padding: 4px 12px;
+  background: #3B82F6;
+  color: white;
+  border: none;
+  border-radius: 20px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-left: auto;
+}
+.fix-btn:hover {
+  background: #2563EB;
 }/*# sourceMappingURL=IssueDashboardStyle.css.map */
