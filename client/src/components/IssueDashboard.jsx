@@ -32,14 +32,12 @@ L.Icon.Default.mergeOptions({
 function MapRestrictions({ bounds, center, zoom, markers }) {
   const map = useMap();
 
-  // Center map on school when component mounts
   useEffect(() => {
     if (map) {
       map.setView(center, zoom, { animate: true, duration: 0.5 });
     }
   }, [map, center, zoom]);
 
-  // Set max bounds
   useEffect(() => {
     if (map && bounds) {
       map.setMaxBounds([
@@ -55,21 +53,17 @@ function MapRestrictions({ bounds, center, zoom, markers }) {
     };
   }, [map, bounds]);
 
-  // Handle drag events
   useMapEvents({
     drag: () => {
       const currentBounds = map.getBounds();
-      // Check if map is being dragged outside bounds
       if (currentBounds.getSouth() < SCHOOL_BOUNDS.south || 
           currentBounds.getNorth() > SCHOOL_BOUNDS.north ||
           currentBounds.getWest() < SCHOOL_BOUNDS.west ||
           currentBounds.getEast() > SCHOOL_BOUNDS.east) {
-        // Gently push back to school center
         map.panTo(SCHOOL_COORDS, { animate: true, duration: 0.3 });
       }
     },
     zoomend: () => {
-      // Prevent zooming too far out
       if (map.getZoom() < 15) {
         map.setZoom(15, { animate: true });
       }
@@ -148,6 +142,11 @@ function IssueDashboard() {
     }
   }, [navigate]);
 
+  // Navigate to PDF Reports Page
+  const handleGoToReports = () => {
+    navigate('/admin/reports');
+  };
+
   const handleFixImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -182,7 +181,7 @@ function IssueDashboard() {
         setFixFile(null);
         setFixPreview(null);
         setSelectedIssueId(null);
-        fetchIssues(); // Refresh list
+        fetchIssues();
       } else {
         alert('❌ เกิดข้อผิดพลาด');
       }
@@ -256,7 +255,6 @@ function IssueDashboard() {
     };
   }, [issues]);
 
-  // Force map re-render when data changes
   useEffect(() => {
     if (!loading && issues.length > 0) {
       setMapKey(Date.now());
@@ -350,7 +348,7 @@ function IssueDashboard() {
         </div>
       </div>
 
-      {/* Map Container - Satellite Only */}
+      {/* Map Container */}
       <div className="map-container">
         {locatedIssues.length > 0 ? (
           <MapContainer
@@ -370,7 +368,6 @@ function IssueDashboard() {
             zoomSnap={0.5}
             zoomDelta={0.5}
           >
-            {/* Esri Satellite */}
             <TileLayer
               url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
               attribution='&copy; <a href="https://www.esri.com">Esri</a>'
@@ -384,7 +381,6 @@ function IssueDashboard() {
               markers={locatedIssues}
             />
             
-            {/* School Marker */}
             <Marker
               position={[SCHOOL_COORDS.lat, SCHOOL_COORDS.lng]}
               icon={L.divIcon({
@@ -402,7 +398,6 @@ function IssueDashboard() {
               </Popup>
             </Marker>
             
-            {/* Issue Markers */}
             {locatedIssues.map((issue) => (
               <MemoizedMarker 
                 key={issue.id} 
@@ -418,9 +413,17 @@ function IssueDashboard() {
         )}
       </div>
 
-      {/* Issues List - Rest remains the same */}
+      {/* Issues List */}
       <div className="issues-list">
-        <h2>📋 รายการแจ้งทั้งหมด ({filteredIssues.length})</h2>
+        <div className="issues-header">
+          <h2>📋 รายการแจ้งทั้งหมด ({filteredIssues.length})</h2>
+          <button 
+            className="pdf-report-btn"
+            onClick={handleGoToReports}
+          >
+            📄 รายงาน PDF
+          </button>
+        </div>
         {filteredIssues.length === 0 ? (
           <div className="empty-state">ไม่มีรายการที่ตรงกับเงื่อนไข</div>
         ) : (
@@ -484,6 +487,7 @@ function IssueDashboard() {
         )}
       </div>
 
+      {/* ---------- Selected Issue Modal ---------- */}
       {selectedIssue && (
         <div className="modal-overlay" onClick={() => setSelectedIssue(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -507,6 +511,7 @@ function IssueDashboard() {
         </div>
       )}
 
+      {/* ---------- Fix Modal ---------- */}
       {showFixModal && (
         <div className="modal-overlay" onClick={() => setShowFixModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>

@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status, Request, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 import cloudinary
 import cloudinary.uploader
 import psycopg2
@@ -10,12 +11,20 @@ from dotenv import load_dotenv
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage, ImageSendMessage,  
+    MessageEvent, TextMessage, TextSendMessage, ImageSendMessage,
     QuickReply, QuickReplyButton, URIAction
 )
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import locale
 
 # ---------- Setup Logging ----------
 logging.basicConfig(
@@ -117,7 +126,6 @@ async def resolve_issue(
 ):
     logger.info(f"🔧 Resolving issue ID: {issue_id}")
     
-    # Upload fix image to Cloudinary
     try:
         logger.info(f"📤 Uploading fix image to Cloudinary: {fix_image.filename}")
         upload_result = cloudinary.uploader.upload(
@@ -134,7 +142,6 @@ async def resolve_issue(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Update issue: set status = 'resolved', fix_image_url, resolved_at
         query = """
             UPDATE issues 
             SET status = 'resolved', 
@@ -153,11 +160,9 @@ async def resolve_issue(
         cursor.close()
         conn.close()
 
-        # -------- Send LINE notification with image --------
         try:
             line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
             
-            # Text message
             text_msg = TextSendMessage(
                 text=(
                     f"✅ เรื่องแจ้งของคุณได้รับการแก้ไขแล้ว!\n\n"
@@ -167,13 +172,11 @@ async def resolve_issue(
                 )
             )
             
-            # Image message – send the fix photo directly
             image_msg = ImageSendMessage(
                 original_content_url=fix_image_url,
                 preview_image_url=fix_image_url
             )
             
-            # Send both as a multi-message (text + image)
             line_bot_api.push_message(
                 to=line_user_id,
                 messages=[text_msg, image_msg]
@@ -255,7 +258,6 @@ async def create_issue(
         cursor.close()
         conn.close()
 
-        # -------- Send LINE confirmation message --------
         try:
             if issue_type == 'suggestion':
                 msg_text = "✅ ส่งข้อเสนอแนะสำเร็จแล้ว!\nขอบคุณที่ช่วยพัฒนาโรงเรียนของเรา 🙏"
@@ -270,7 +272,6 @@ async def create_issue(
             logger.info("✅ LINE confirmation sent")
         except Exception as e:
             logger.error(f"❌ LINE push error: {e}", exc_info=True)
-            # Don't fail the request if push fails
 
         return {
             "success": True,
@@ -391,18 +392,17 @@ def handle_message(event):
     
     else:
         logger.info(f"❓ Unknown command: {user_text} from {user_id}")
-        # Optional: reply with help message
         help_text = "พิมพ์ 'ผู้ใช้ใหม่' เพื่อดูวิธีการใช้งาน\nพิมพ์ 'แจ้งเรื่องใหม่' เพื่อแจ้งปัญหา\nพิมพ์ 'ดูเรื่องแจ้ง' เพื่อดูรายการที่แจ้ง"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_text))
 
 
+# ---------- Auto-delete old resolved issues ----------
 def delete_old_resolved_issues():
     """ลบรายการปัญหาที่แก้ไขแล้ว (status='resolved') ที่เก่ากว่า 4 วัน"""
     logger.info("🧹 Running scheduled cleanup: deleting old resolved issues")
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Delete issues where status='resolved' and resolved_at < now - 4 days
         query = """
             DELETE FROM issues 
             WHERE status = 'resolved' 
@@ -421,15 +421,318 @@ def delete_old_resolved_issues():
     except Exception as e:
         logger.error(f"❌ Cleanup error: {e}", exc_info=True)
 
-# Schedule the job to run daily at 3:00 AM
+
+def generate_urgent_report_pdf():
+    """Generate PDF report of all pending urgent issues and save to reports/ folder."""
+    logger.info("📄 Generating urgent issues report...")
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # Fetch pending urgent issues for TODAY ONLY
+        query = """
+            SELECT reporter_name, description, created_at 
+            FROM issues 
+            WHERE issue_type = 'urgent' 
+              AND status = 'pending'
+              AND DATE(created_at) = CURRENT_DATE
+            ORDER BY created_at ASC
+        """
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        if not rows:
+            logger.info("ℹ️ No urgent pending issues to report for today.")
+            return None
+
+        # Create reports directory if not exists
+        os.makedirs("reports", exist_ok=True)
+
+        # File name with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        filename = f"reports/urgent_report_{timestamp}.pdf"
+        
+        # ---------- Font Loading ----------
+        font_name = 'Helvetica'  # fallback
+        font_registered = False
+        
+        # Priority 1: fonts folder (your custom font)
+        font_paths = [
+            "fonts/THSarabunNew.ttf",
+            "fonts/THSarabun.ttf",
+            "C:/Windows/Fonts/THSarabunNew.ttf",
+            "C:/Windows/Fonts/THSarabun.ttf",
+            "C:/Windows/Fonts/Arial Unicode.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/usr/share/fonts/truetype/thai/THSarabunNew.ttf",
+        ]
+        
+        for path in font_paths:
+            if os.path.exists(path):
+                try:
+                    pdfmetrics.registerFont(TTFont('ThaiFont', path))
+                    font_name = 'ThaiFont'
+                    font_registered = True
+                    logger.info(f"✅ Thai font loaded: {path}")
+                    break
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not load font from {path}: {e}")
+                    continue
+        
+        if not font_registered:
+            try:
+                from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+                pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
+                font_name = 'STSong-Light'
+                font_registered = True
+                logger.info("✅ Using UnicodeCIDFont (STSong-Light) as fallback")
+            except:
+                logger.warning("⚠️ No Thai font found. Using Helvetica.")
+                font_name = 'Helvetica'
+
+        # ---------- PDF Setup ----------
+        # A4 Landscape with generous margins
+        doc = SimpleDocTemplate(
+            filename, 
+            pagesize=A4,
+            rightMargin=30, 
+            leftMargin=30,
+            topMargin=30, 
+            bottomMargin=30
+        )
+
+        AVAILABLE_WIDTH = 595 - 60  # 535 points
+        TABLE_WIDTH = int(AVAILABLE_WIDTH * 0.95)
+
+        col1 = int(TABLE_WIDTH * 0.20)   
+        col2 = int(TABLE_WIDTH * 0.60)   
+        col3 = int(TABLE_WIDTH * 0.20)
+
+        styles = getSampleStyleSheet()
+        
+        # Title style - Font size 20 for visibility
+        title_style = ParagraphStyle(
+            'Title',
+            parent=styles['Title'],
+            fontName=font_name,
+            fontSize=20,  # Increased for better visibility
+            alignment=TA_CENTER,
+            spaceAfter=20
+        )
+        
+        # Header style - Font size 16
+        header_style = ParagraphStyle(
+            'Header',
+            parent=styles['Heading2'],
+            fontName=font_name,
+            fontSize=16,
+            alignment=TA_CENTER,
+            textColor=colors.white,
+            backColor=colors.HexColor('#0d6efd'),
+            leading=20  # Line height for headers
+        )
+        
+        # Cell style - Font size 16
+        cell_style = ParagraphStyle(
+            'Cell',
+            parent=styles['Normal'],
+            fontName=font_name,
+            fontSize=16,
+            alignment=TA_LEFT,
+            leading=22  # Line height for cell content (readable with Thai text)
+        )
+
+        # ---------- Build Table Data ----------
+        data = []
+        # Header row
+        data.append([
+            Paragraph("ชื่อผู้แจ้ง", header_style),
+            Paragraph("สถานที่ / รายละเอียด", header_style),
+            Paragraph("วันที่แจ้ง", header_style)
+        ])
+
+        for row in rows:
+            reporter = row[0] or "ไม่ระบุ"
+            description = row[1] or ""
+            # Try to split location and detail
+            full_text = description
+            if "สถานที่:" in description and "\n" in description:
+                parts = description.split("\n", 1)
+                location_text = parts[0].replace("สถานที่:", "").strip()
+                detail_text = parts[1].replace("รายละเอียด:", "").strip() if len(parts) > 1 else ""
+                full_text = f"สถานที่: {location_text}\nรายละเอียด: {detail_text}"
+
+            created_at = row[2].strftime("%d/%m/%Y %H:%M") if row[2] else ""
+
+            data.append([
+                Paragraph(reporter, cell_style),
+                Paragraph(full_text, cell_style),
+                Paragraph(created_at, cell_style)
+            ])
+
+        # ---------- Create Table ----------
+        table = Table(data, colWidths=[col1, col2, col3])
+        table.setStyle(TableStyle([
+            # Header background
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0d6efd')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTNAME', (0, 0), (-1, -1), font_name),
+            # ---------- FIX: Set font size for ALL cells ----------
+            ('FONTSIZE', (0, 0), (-1, -1), 16),  # <-- NOW applied to all cells
+            # Header specific
+            ('FONTSIZE', (0, 0), (-1, 0), 16),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 14),
+            # Cell padding (margins inside cells)
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            # Background for data rows (alternating)
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            # Grid lines
+            ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+            # Row height (allows content to fit)
+            ('MINIMUMHEIGHT', (0, 1), (-1, -1), 30),
+        ]))
+
+        # ---------- Build Document ----------
+        elements = []
+        today_str = datetime.now().strftime("%d/%m/%Y")
+        elements.append(Paragraph(f"รายงานปัญหาเร่งด่วนประจำวันที่ {today_str}", title_style))
+        elements.append(Spacer(1, 16))  # Space between title and table
+        elements.append(table)
+
+        doc.build(elements)
+        logger.info(f"✅ Report saved: {filename}")
+        return filename
+
+    except Exception as e:
+        logger.error(f"❌ Report generation error: {e}", exc_info=True)
+        return None
+
+# Schedule daily at 18:00
+def scheduled_report():
+    generate_urgent_report_pdf()
+
 scheduler = BackgroundScheduler()
 scheduler.add_job(
-    delete_old_resolved_issues,
-    trigger=CronTrigger(hour=3, minute=0),
-    id="cleanup_resolved_issues",
+    scheduled_report,
+    trigger=CronTrigger(hour=18, minute=0),
+    id="daily_urgent_report",
     replace_existing=True
 )
 scheduler.start()
+
+
+# ---------- NEW: API to generate report on demand ----------
+@app.get("/api/generate-report")
+async def generate_report_on_demand():
+    """Generate report immediately (for testing)"""
+    try:
+        filename = generate_urgent_report_pdf()
+        if filename:
+            return {
+                "success": True,
+                "message": "Report generated successfully",
+                "file": filename
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No pending urgent issues found for today"
+            }
+    except Exception as e:
+        logger.error(f"❌ Generate report error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------- NEW: Get list of all reports ----------
+@app.get("/api/reports-list")
+async def get_reports_list():
+    """Get list of all available report PDFs"""
+    try:
+        reports_dir = "reports"
+        if not os.path.exists(reports_dir):
+            return {"success": True, "reports": []}
+        
+        files = [f for f in os.listdir(reports_dir) if f.startswith("urgent_report_") and f.endswith(".pdf")]
+        reports = []
+        for f in sorted(files, reverse=True):
+            # Extract date from filename
+            # Format: urgent_report_20250101_1800.pdf
+            parts = f.replace("urgent_report_", "").replace(".pdf", "").split("_")
+            date_str = parts[0] if len(parts) > 0 else ""
+            time_str = parts[1] if len(parts) > 1 else ""
+            try:
+                report_date = datetime.strptime(date_str, "%Y%m%d").strftime("%d/%m/%Y")
+            except:
+                report_date = date_str
+            
+            reports.append({
+                "filename": f,
+                "date": report_date,
+                "time": time_str,
+                "fullDate": f"{report_date} {time_str[:2]}:{time_str[2:]}",
+                "filepath": f"/api/download-report/{f}"
+            })
+        
+        return {"success": True, "reports": reports}
+    except Exception as e:
+        logger.error(f"❌ Reports list error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------- Updated download endpoint ----------
+@app.get("/api/download-report/{filename}")
+async def download_specific_report(filename: str):
+    """Download a specific report by filename"""
+    try:
+        # Security: prevent path traversal
+        if ".." in filename or not filename.endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
+        file_path = os.path.join("reports", filename)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Report not found")
+        
+        return FileResponse(
+            file_path,
+            media_type='application/pdf',
+            filename=filename
+        )
+    except Exception as e:
+        logger.error(f"❌ Download error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error retrieving report")
+
+
+# ---------- Keep old endpoint for backward compatibility ----------
+@app.get("/api/download-report")
+async def download_latest_report():
+    """Download the most recent urgent report PDF."""
+    try:
+        reports_dir = "reports"
+        if not os.path.exists(reports_dir):
+            raise HTTPException(status_code=404, detail="No reports found")
+        
+        files = [f for f in os.listdir(reports_dir) if f.startswith("urgent_report_") and f.endswith(".pdf")]
+        if not files:
+            raise HTTPException(status_code=404, detail="No reports available")
+        
+        files.sort(reverse=True)
+        latest = files[0]
+        file_path = os.path.join(reports_dir, latest)
+        return FileResponse(
+            file_path,
+            media_type='application/pdf',
+            filename=f"urgent_report_{datetime.now().strftime('%Y%m%d')}.pdf"
+        )
+    except Exception as e:
+        logger.error(f"❌ Download error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error retrieving report")
+
 
 # Shutdown scheduler on app exit
 @app.on_event("shutdown")
