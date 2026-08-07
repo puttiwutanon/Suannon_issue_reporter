@@ -166,9 +166,7 @@ function IssueDashboard() {
       const formData = new FormData();
       formData.append('fix_image', fixFile);
 
-      const res = await fetch(`${apiUrl}/api/issues/${selectedIssueId}/resolve`, {
-        method: 'POST',
-        body: formData,
+      const res = await fetch(`${apiUrl}/api/issues?ngrok-skip-browser-warning=true`, {
         headers: {
           'ngrok-skip-browser-warning': 'true',
         },

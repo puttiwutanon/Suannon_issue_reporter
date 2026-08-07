@@ -21,11 +21,25 @@ export default function IssueFormASAP({ profile }) {
     }
   }, []);
 
-  const handleImageChange = (e) => {
+  async function compressImage(file, maxWidth = 1280, quality = 0.7) {
+    const img = await createImageBitmap(file);
+    const scale = Math.min(1, maxWidth / img.width);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width * scale;
+    canvas.height = img.height * scale;
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(new File([blob], 'photo.jpg', { type: 'image/jpeg' })), 'image/jpeg', quality);
+    });
+  }
+
+  const handleImageChange = async (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
-      setFile(selectedFile);
-      setPreviewUrl(URL.createObjectURL(selectedFile));
+      const compressed = await compressImage(selectedFile);
+      setFile(compressed);
+      setPreviewUrl(URL.createObjectURL(compressed));
     }
   };
 
@@ -48,11 +62,8 @@ export default function IssueFormASAP({ profile }) {
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      const res = await fetch(`${apiUrl}/api/issues`, {
+      const res = await fetch(`${apiUrl}/api/issues?ngrok-skip-browser-warning=true`, {
         method: 'POST',
-        headers: {
-          'ngrok-skip-browser-warning': 'true'
-        },
         body: formData,
       });
 

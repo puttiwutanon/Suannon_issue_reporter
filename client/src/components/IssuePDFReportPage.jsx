@@ -3,6 +3,41 @@ import { useNavigate } from 'react-router-dom';
 import { doSignOut } from '../firebase/auth';
 import './styles/IssueDashboardStyle.scss';
 
+const logger = {
+  info: (message, data = null) => {
+    const timestamp = new Date().toLocaleTimeString('th-TH', { hour12: false });
+    if (data) {
+      console.log(`[${timestamp}] ℹ️ ${message}`, data);
+    } else {
+      console.log(`[${timestamp}] ℹ️ ${message}`);
+    }
+  },
+  error: (message, error = null) => {
+    const timestamp = new Date().toLocaleTimeString('th-TH', { hour12: false });
+    if (error) {
+      console.error(`[${timestamp}] ❌ ${message}`, error);
+    } else {
+      console.error(`[${timestamp}] ❌ ${message}`);
+    }
+  },
+  debug: (message, data = null) => {
+    const timestamp = new Date().toLocaleTimeString('th-TH', { hour12: false });
+    if (data) {
+      console.debug(`[${timestamp}] 🔍 ${message}`, data);
+    } else {
+      console.debug(`[${timestamp}] 🔍 ${message}`);
+    }
+  },
+  success: (message, data = null) => {
+    const timestamp = new Date().toLocaleTimeString('th-TH', { hour12: false });
+    if (data) {
+      console.log(`[${timestamp}] ✅ ${message}`, data);
+    } else {
+      console.log(`[${timestamp}] ✅ ${message}`);
+    }
+  },
+};
+
 function IssuePDFReportPage() {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -11,24 +46,57 @@ function IssuePDFReportPage() {
   const navigate = useNavigate();
 
   const fetchReports = async () => {
+    logger.info('🚀 Fetching reports list started');
+
     try {
-      setLoading(true);
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      const url = `${apiUrl}/api/reports-list?ngrok-skip-browser-warning=true`;
-      
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('Failed to fetch reports');
+      logger.debug(`📡 API URL from env: ${apiUrl}`);
+
+      const url = `${apiUrl}/api/reports-list`;
+      logger.info(`🔗 Final fetch URL: ${url}`);
+
+      const startTime = Date.now();
+      logger.info('⏳ Sending request...');
+
+      const res = await fetch(url, {
+        headers: {
+          'ngrok-skip-browser-warning': 'true'
+        }
+      });
+
+      const elapsed = Date.now() - startTime;
+      logger.info(`⏱️ Request completed in ${elapsed}ms`);
+      logger.info(`📡 Response status: ${res.status} ${res.statusText}`);
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+
       const data = await res.json();
+      logger.success('📦 API response received', {
+        success: data.success,
+        reportsCount: data.reports?.length || 0
+      });
+
       if (data.success) {
         setReports(data.reports);
+        setError(null);
+        logger.success(`✅ Set ${data.reports.length} reports in state`);
       } else {
+        logger.error('❌ API returned success: false');
         setError('ไม่สามารถโหลดรายการรายงานได้');
+        setReports([]);
       }
     } catch (err) {
-      console.error('Fetch reports error:', err);
+      logger.error(`❌ Fetch error: ${err.message}`, {
+        name: err.name,
+        stack: err.stack
+      });
       setError('เกิดข้อผิดพลาดในการโหลดข้อมูล');
+      setReports([]);
     } finally {
       setLoading(false);
+      logger.info('🏁 Fetch completed');
     }
   };
 
@@ -41,7 +109,7 @@ function IssuePDFReportPage() {
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const url = `${apiUrl}/api/generate-report?ngrok-skip-browser-warning=true`;
-      
+
       const res = await fetch(url);
       if (!res.ok) throw new Error('Failed to generate report');
       const data = await res.json();
@@ -120,8 +188,8 @@ function IssuePDFReportPage() {
 
       {/* Actions */}
       <div className="report-actions">
-        <button 
-          className="generate-report-btn" 
+        <button
+          className="generate-report-btn"
           onClick={handleGenerateReport}
           disabled={generating}
         >
@@ -164,7 +232,7 @@ function IssuePDFReportPage() {
                     <td>{report.time ? `${report.time.slice(0, 2)}:${report.time.slice(2, 4)}` : '-'}</td>
                     <td className="filename-cell">{report.filename}</td>
                     <td>
-                      <button 
+                      <button
                         className="download-btn"
                         onClick={() => handleDownloadReport(report.filename)}
                       >

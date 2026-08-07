@@ -41,7 +41,14 @@ app = FastAPI(title="School Issue Reporter API")
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://*.trycloudflare.com",     # cloudflared frontend
+        "https://*.ngrok-free.dev",        # ngrok backend (for API calls)
+        "https://liff.line.me",            # LINE LIFF
+        "http://localhost:5173",           # local dev
+        "http://localhost:8000",           # local dev
+        "*"                                # fallback (remove in production)
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -620,11 +627,28 @@ def scheduled_report():
 scheduler = BackgroundScheduler()
 scheduler.add_job(
     scheduled_report,
-    trigger=CronTrigger(hour=18, minute=0),
+    trigger=CronTrigger(hour=18, minute=0, timezone="Asia/Bangkok"),
     id="daily_urgent_report",
-    replace_existing=True
+    replace_existing=True,
+    misfire_grace_time=3600,  # allow up to 1hr late
+    coalesce=True,
 )
+
+from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, EVENT_JOB_MISSED
+
+def job_listener(event):
+    if event.exception:
+        logger.error(f"❌ Scheduled job failed: {event.exception}")
+    elif event.code == EVENT_JOB_MISSED:
+        logger.warning(f"⚠️ Scheduled job missed its run time: {event}")
+    else:
+        logger.info("✅ Scheduled job executed successfully")
+
+scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
+
 scheduler.start()
+
+
 
 
 # ---------- NEW: API to generate report on demand ----------

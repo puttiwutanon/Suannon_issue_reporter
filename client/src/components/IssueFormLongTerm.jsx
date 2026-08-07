@@ -40,11 +40,8 @@ export default function IssueFormLongTerm({ profile }) {
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      const res = await fetch(`${apiUrl}/api/issues`, {
+      const res = await fetch(`${apiUrl}/api/issues?ngrok-skip-browser-warning=true`, {
         method: 'POST',
-        headers: {
-          'ngrok-skip-browser-warning': 'true'
-        },
         body: formData,
       });
 
