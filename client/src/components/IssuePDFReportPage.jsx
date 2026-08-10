@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { doSignOut } from '../firebase/auth';
+import { doSignOut, getIdToken } from '../firebase/auth';
 import './styles/IssueDashboardStyle.scss';
 
 const logger = {
@@ -47,6 +47,7 @@ function IssuePDFReportPage() {
 
   const fetchReports = async () => {
     logger.info('🚀 Fetching reports list started');
+    const token = await getIdToken();
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -58,11 +59,7 @@ function IssuePDFReportPage() {
       const startTime = Date.now();
       logger.info('⏳ Sending request...');
 
-      const res = await fetch(url, {
-        headers: {
-          'ngrok-skip-browser-warning': 'true'
-        }
-      });
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 
       const elapsed = Date.now() - startTime;
       logger.info(`⏱️ Request completed in ${elapsed}ms`);
@@ -105,12 +102,13 @@ function IssuePDFReportPage() {
   }, []);
 
   const handleGenerateReport = async () => {
+    const token = await getIdToken();
     setGenerating(true);
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const url = `${apiUrl}/api/generate-report?ngrok-skip-browser-warning=true`;
 
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error('Failed to generate report');
       const data = await res.json();
       if (data.success) {
@@ -122,15 +120,24 @@ function IssuePDFReportPage() {
     } catch (err) {
       console.error('Generate report error:', err);
       alert('❌ เกิดข้อผิดพลาดในการสร้างรายงาน');
-    } finally {
+    } finally { 
       setGenerating(false);
     }
   };
 
-  const handleDownloadReport = (filename) => {
+  const handleDownloadReport = async (filename) => {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-    const url = `${apiUrl}/api/download-report/${filename}?ngrok-skip-browser-warning=true`;
-    window.open(url, '_blank');
+    const token = await getIdToken();
+    const res = await fetch(`${apiUrl}/api/download-report/${filename}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.URL.revokeObjectURL(url);
   };
 
   const handleLogout = async () => {

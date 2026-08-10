@@ -38,14 +38,13 @@ const logger = {
   },
 };
 
-export default function IssueCheck({ profile, viewMode }) {
+export default function IssueCheck({ profile, viewMode, idToken }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     const fetchIssues = async () => {
-      const timestamp = new Date().toLocaleTimeString('th-TH', { hour12: false });
       logger.info(`🚀 Fetching issues started - ViewMode: ${viewMode}`);
       logger.debug(`👤 Profile:`, { userId: profile.userId, displayName: profile.displayName });
 
@@ -53,24 +52,19 @@ export default function IssueCheck({ profile, viewMode }) {
         const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
         logger.debug(`📡 API URL from env: ${apiUrl}`);
         
-        let url = `${apiUrl}/api/issues`;
-        logger.debug(`🔗 Base URL: ${url}`);
-        
-        if (viewMode === 'view_mine') {
-          url += `?user_id=${profile.userId}`;
-          logger.info(`🔍 Filtering by user_id: ${profile.userId}`);
-        }
-        
-        logger.info(`🔗 Final fetch URL: ${url}`);
+        let url = `${apiUrl}/api/issues/community?view_mode=${viewMode === 'view_mine' ? 'mine' : 'others'}`;
+        logger.debug(`🔗 Final URL: ${url}`);
 
         const startTime = Date.now();
         logger.info(`⏳ Sending request...`);
 
         const res = await fetch(url, {
-          headers: {
+          headers: { 
+            'x-line-id-token': idToken,
             'ngrok-skip-browser-warning': 'true'
-          }
+          },
         });
+        
         const elapsed = Date.now() - startTime;
         logger.info(`⏱️ Request completed in ${elapsed}ms`);
         logger.info(`📡 Response status: ${res.status} ${res.statusText}`);
@@ -86,15 +80,8 @@ export default function IssueCheck({ profile, viewMode }) {
         });
 
         if (data.success) {
-          let fetched = data.issues;
-          if (viewMode === 'view_others') {
-            logger.info(`🔍 Filtering for 'others' mode - excluding user ${profile.userId}`);
-            const beforeCount = fetched.length;
-            fetched = fetched.filter(issue => issue.lineUserId !== profile.userId);
-            logger.info(`📊 Filtered from ${beforeCount} to ${fetched.length} issues`);
-          }
-          setIssues(fetched);
-          logger.success(`✅ Set ${fetched.length} issues in state`);
+          setIssues(data.issues);
+          logger.success(`✅ Set ${data.issues.length} issues in state`);
         } else {
           logger.error(`❌ API returned success: false`);
           setError('API returned success: false');
@@ -109,12 +96,12 @@ export default function IssueCheck({ profile, viewMode }) {
         setIssues([]);
       } finally {
         setLoading(false);
-        logger.info(`🏁 Fetch completed - Loading: ${loading}`);
+        logger.info(`🏁 Fetch completed`);
       }
     };
 
     fetchIssues();
-  }, [profile, viewMode]);
+  }, [profile, viewMode, idToken]);
 
   // ... (rest of the component remains the same)
   

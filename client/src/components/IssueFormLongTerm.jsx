@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import liff from '@line/liff';
 import './styles/IssueFormLongTermStyle.scss';
 
-export default function IssueFormLongTerm({ profile }) {
+export default function IssueFormASAP({ profile, idToken }) {  
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [year, setYear] = useState('');
@@ -28,7 +28,7 @@ export default function IssueFormLongTerm({ profile }) {
     setStatusMsg('กำลังส่งข้อมูล...');
 
     const formData = new FormData();
-    formData.append('lineUserId', profile.userId);
+    formData.append('lineIdToken', idToken);
     formData.append('reporterName', `${firstName} ${lastName}`);
     formData.append('category', 'Suggestion');
     formData.append('description', message);

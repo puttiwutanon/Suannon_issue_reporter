@@ -1,65 +1,73 @@
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status, Query
+from fastapi import APIRouter, Depends, Request, UploadFile, File, Form, HTTPException, status, Query
 import cloudinary.uploader
 from linebot.models import TextSendMessage, ImageSendMessage
-
+from ..firebase_auth import require_admin
+from ..line_auth import verify_line_id_token
 from ..config import logger
 from ..db import get_db_connection
 from ..line_client import line_bot_api
+from ..config import limiter
 
 router = APIRouter(prefix="/api", tags=["issues"])
 
+def _row_to_issue(row):
+    return {
+        "id": row[0],
+        "lineUserId": row[1],
+        "reporterName": row[2],
+        "category": row[3],
+        "description": row[4],
+        "imageUrl": row[5],
+        "latitude": float(row[6]) if row[6] else None,
+        "longitude": float(row[7]) if row[7] else None,
+        "status": row[8],
+        "createdAt": str(row[9]),
+        "studentYear": row[10] if len(row) > 10 else None,
+        "studentClass": row[11] if len(row) > 11 else None,
+        "studentNumber": row[12] if len(row) > 12 else None,
+        "issueType": row[13] if len(row) > 13 else None,
+        "fixImageUrl": row[14] if len(row) > 14 else None,
+        "resolvedAt": str(row[15]) if len(row) > 15 and row[15] else None,
+    }
 
-# ---------- GET /api/issues ----------
+
+# ---------- GET /api/issues (Admin Only) ----------
 @router.get("/issues")
-async def get_issues(
-    user_id: Optional[str] = Query(None, description="Filter by LINE user ID")
+async def get_issues(admin=Depends(require_admin)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM issues ORDER BY created_at DESC")
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    issues = [_row_to_issue(row) for row in rows]
+    return {"success": True, "issues": issues}
+
+
+# ---------- GET /api/issues/community (LIFF Users) ----------
+@router.get("/issues/community")
+async def get_community_issues(
+    view_mode: str = "mine", 
+    line_user=Depends(verify_line_id_token)
 ):
-    logger.info(f"📥 GET /api/issues - user_id: {user_id}")
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        if user_id:
-            logger.info(f"🔍 Fetching issues for user: {user_id}")
-            query = "SELECT * FROM issues WHERE line_user_id = %s ORDER BY created_at DESC"
-            cursor.execute(query, (user_id,))
-        else:
-            logger.info("📋 Fetching all issues")
-            query = "SELECT * FROM issues ORDER BY created_at DESC"
-            cursor.execute(query)
-
-        rows = cursor.fetchall()
-        logger.info(f"✅ Found {len(rows)} issues")
-        cursor.close()
-        conn.close()
-
-        issues = []
-        for row in rows:
-            issues.append({
-                "id": row[0],
-                "lineUserId": row[1],
-                "reporterName": row[2],
-                "category": row[3],
-                "description": row[4],
-                "imageUrl": row[5],
-                "latitude": float(row[6]) if row[6] else None,
-                "longitude": float(row[7]) if row[7] else None,
-                "status": row[8],
-                "createdAt": str(row[9]),
-                "studentYear": row[10] if len(row) > 10 else None,
-                "studentClass": row[11] if len(row) > 11 else None,
-                "studentNumber": row[12] if len(row) > 12 else None,
-                "issueType": row[13] if len(row) > 13 else None,
-                "fixImageUrl": row[14] if len(row) > 14 else None,
-                "resolvedAt": str(row[15]) if len(row) > 15 and row[15] else None,
-            })
-
-        logger.info(f"📤 Returning {len(issues)} issues")
-        return {"success": True, "issues": issues}
-    except Exception as e:
-        logger.error(f"❌ GET error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if view_mode == "mine":
+        cursor.execute(
+            "SELECT * FROM issues WHERE line_user_id = %s ORDER BY created_at DESC",
+            (line_user["userId"],)
+        )
+    else:
+        cursor.execute(
+            "SELECT * FROM issues WHERE line_user_id != %s ORDER BY created_at DESC",
+            (line_user["userId"],)
+        )
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    issues = [_row_to_issue(row) for row in rows]
+    return {"success": True, "issues": issues}
 
 
 # ---------- POST /api/issues/{issue_id}/resolve ----------
@@ -67,10 +75,22 @@ async def get_issues(
 async def resolve_issue(
     issue_id: int,
     fix_image: UploadFile = File(...),
+    admin=Depends(require_admin),
 ):
     logger.info(f"🔧 Resolving issue ID: {issue_id}")
 
+    MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+    def _validate_image(upload_file):
+        if not upload_file.content_type or not upload_file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="Invalid file type")
+        contents = upload_file.file.read()
+        if len(contents) > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=400, detail="Image too large")
+        upload_file.file.seek(0)
+
     try:
+        _validate_image(fix_image)
         logger.info(f"📤 Uploading fix image to Cloudinary: {fix_image.filename}")
         upload_result = cloudinary.uploader.upload(
             fix_image.file,
@@ -140,7 +160,8 @@ async def resolve_issue(
 # ---------- POST /api/issues ----------
 @router.post("/issues", status_code=status.HTTP_201_CREATED)
 async def create_issue(
-    lineUserId: str = Form(...),
+    request: Request,
+    lineIdToken: str = Form(...),
     reporterName: Optional[str] = Form(None),
     category: str = Form(...),
     description: str = Form(...),
@@ -152,13 +173,30 @@ async def create_issue(
     studentNumber: Optional[str] = Form(None),
     issue_type: Optional[str] = Form('urgent'),
 ):
+    # Verify LINE token
+    line_user = await verify_line_id_token(x_line_id_token=lineIdToken)
+    lineUserId = line_user["userId"]
+    # Use token display name if reporterName not provided
+    if not reporterName:
+        reporterName = line_user.get("displayName", "ผู้ใช้ LINE")
+    
     logger.info(f"📝 POST /api/issues - User: {lineUserId}, Type: {issue_type}, Category: {category}")
     logger.info(f"📝 Reporter: {reporterName}, Description length: {len(description) if description else 0}")
     logger.info(f"📝 Student: {studentYear}/{studentClass}/{studentNumber}")
 
     image_url = None
+    MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+    def _validate_image(upload_file):
+        if not upload_file.content_type or not upload_file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="Invalid file type")
+        contents = upload_file.file.read()
+        if len(contents) > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=400, detail="Image too large")
+        upload_file.file.seek(0)
 
     if image:
+        _validate_image(image)
         try:
             logger.info(f"📤 Uploading image to Cloudinary: {image.filename}")
             upload_result = cloudinary.uploader.upload(

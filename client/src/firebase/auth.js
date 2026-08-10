@@ -27,3 +27,5 @@ export const doSignInWithEmailAndPassword = (email, password) => {
 export const onAuthStateChange = (callback) => {
   return onAuthStateChanged(auth, callback);
 };
+
+export const getIdToken = () => auth.currentUser?.getIdToken();

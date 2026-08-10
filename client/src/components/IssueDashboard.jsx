@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 're
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './styles/IssueDashboardStyle.scss';
-import { doSignOut } from '../firebase/auth';
+import { doSignOut, getIdToken } from '../firebase/auth';
 import { useNavigate } from 'react-router-dom';
 
 // School coordinates (13°54'48.6"N 100°30'18.7"E)
@@ -156,20 +156,18 @@ function IssueDashboard() {
   };
 
   const handleSubmitFix = async () => {
-    if (!fixFile) {
-      alert('กรุณาเลือกรูปภาพ');
-      return;
-    }
+    if (!fixFile) { alert('กรุณาเลือกรูปภาพ'); return; }
     setFixing(true);
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const apiUrl = 'http://localhost:8000';
+      const token = await getIdToken();
       const formData = new FormData();
       formData.append('fix_image', fixFile);
 
-      const res = await fetch(`${apiUrl}/api/issues?ngrok-skip-browser-warning=true`, {
-        headers: {
-          'ngrok-skip-browser-warning': 'true',
-        },
+      const res = await fetch(`${apiUrl}/api/issues/${selectedIssueId}/resolve`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
       });
       if (!res.ok) throw new Error('Failed to resolve issue');
       const data = await res.json();
@@ -193,14 +191,11 @@ function IssueDashboard() {
 
   const fetchIssues = useCallback(async () => {
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const apiUrl = 'http://localhost:8000';
       const url = `${apiUrl}/api/issues`;
+      const token = await getIdToken();
 
-      const res = await fetch(url, {
-        headers: {
-          'ngrok-skip-browser-warning': 'true',
-        },
-      });
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error('API error: ' + res.status);
 
       const data = await res.json();

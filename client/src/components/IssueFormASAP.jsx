@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import liff from '@line/liff';
 import './styles/IssueFormASAPStyle.scss';
 
-export default function IssueFormASAP({ profile }) {
+export default function IssueFormASAP({ profile, idToken }) {
   const [category, setCategory] = useState('Facilities');
   const [locationDetail, setLocationDetail] = useState('');
   const [description, setDescription] = useState('');
@@ -28,7 +28,6 @@ export default function IssueFormASAP({ profile }) {
     canvas.width = img.width * scale;
     canvas.height = img.height * scale;
     canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-
     return new Promise((resolve) => {
       canvas.toBlob((blob) => resolve(new File([blob], 'photo.jpg', { type: 'image/jpeg' })), 'image/jpeg', quality);
     });
@@ -49,7 +48,7 @@ export default function IssueFormASAP({ profile }) {
     setStatusMsg('กำลังส่งข้อมูล...');
 
     const formData = new FormData();
-    formData.append('lineUserId', profile.userId);
+    formData.append('lineIdToken', idToken);
     formData.append('reporterName', profile.displayName);
     formData.append('category', category);
     const fullDescription = `สถานที่: ${locationDetail}\nรายละเอียด: ${description}`;
@@ -62,22 +61,26 @@ export default function IssueFormASAP({ profile }) {
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      console.log('📤 Sending to:', apiUrl);
+      
       const res = await fetch(`${apiUrl}/api/issues?ngrok-skip-browser-warning=true`, {
         method: 'POST',
         body: formData,
       });
 
       const data = await res.json();
+      console.log('📥 Response:', data);
+
       if (res.ok && data.success) {
         setStatusMsg('✅ แจ้งปัญหาสำเร็จ!');
         setTimeout(() => {
           if (liff.isInClient()) liff.closeWindow();
         }, 1500);
       } else {
-        setStatusMsg('❌ เกิดข้อผิดพลาดในการส่งข้อมูล');
+        setStatusMsg(`❌ ${data.detail || 'เกิดข้อผิดพลาดในการส่งข้อมูล'}`);
       }
     } catch (err) {
-      console.error(err);
+      console.error('❌ Error:', err);
       setStatusMsg('❌ ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้');
     } finally {
       setIsSubmitting(false);

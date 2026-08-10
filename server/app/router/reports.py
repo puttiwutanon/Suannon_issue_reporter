@@ -1,7 +1,9 @@
 import os
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+
+from ..firebase_auth import require_admin
 
 from ..config import logger
 from ..reports_pdf import generate_urgent_report_pdf
@@ -11,7 +13,7 @@ router = APIRouter(prefix="/api", tags=["reports"])
 
 # ---------- Generate report on demand ----------
 @router.get("/generate-report")
-async def generate_report_on_demand():
+async def generate_report_on_demand(admin=Depends(require_admin)):
     """Generate report immediately (for testing)"""
     try:
         filename = generate_urgent_report_pdf()
@@ -33,7 +35,7 @@ async def generate_report_on_demand():
 
 # ---------- Get list of all reports ----------
 @router.get("/reports-list")
-async def get_reports_list():
+async def get_reports_list(admin=Depends(require_admin)):
     """Get list of all available report PDFs"""
     try:
         reports_dir = "reports"
@@ -69,11 +71,11 @@ async def get_reports_list():
 
 # ---------- Download a specific report ----------
 @router.get("/download-report/{filename}")
-async def download_specific_report(filename: str):
+async def download_specific_report(filename: str, admin=Depends(require_admin)):
     """Download a specific report by filename"""
     try:
         # Security: prevent path traversal
-        if ".." in filename or not filename.endswith(".pdf"):
+        if os.path.basename(filename) != filename or not filename.endswith(".pdf"):
             raise HTTPException(status_code=400, detail="Invalid filename")
 
         file_path = os.path.join("reports", filename)
@@ -92,7 +94,7 @@ async def download_specific_report(filename: str):
 
 # ---------- Keep old endpoint for backward compatibility ----------
 @router.get("/download-report")
-async def download_latest_report():
+async def download_latest_report(admin=Depends(require_admin)):
     """Download the most recent urgent report PDF."""
     try:
         reports_dir = "reports"
