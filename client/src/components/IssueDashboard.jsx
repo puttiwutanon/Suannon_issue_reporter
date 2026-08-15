@@ -462,7 +462,7 @@ function IssueDashboard() {
                   <span className="location">📍 มีตำแหน่งที่ตั้ง</span>
                 )}
 
-                {issue.status === 'pending' && (
+                {issue.status === 'pending' && issue.issueType === 'urgent' && (
                   <button 
                     className="fix-btn"
                     onClick={(e) => {
@@ -471,7 +471,7 @@ function IssueDashboard() {
                       setShowFixModal(true);
                     }}
                   >
-                    🔧 แจ้งว่าซ่อมแล้ว
+                    🔧 แจ้งว่าแก้ไขแล้ว
                   </button>
                 )}
               </div>
