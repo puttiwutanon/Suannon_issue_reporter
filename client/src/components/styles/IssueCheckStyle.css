@@ -92,4 +92,9 @@
   margin: 2px 0;
   font-size: 13px;
   color: #6B7280;
+}
+
+.map-container .leaflet-container {
+  border-radius: 8px;
+  border: 1px solid #E5E7EB;
 }/*# sourceMappingURL=IssueCheckStyle.css.map */

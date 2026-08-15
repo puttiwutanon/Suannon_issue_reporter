@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import liff from '@line/liff';
 import './styles/IssueCheckStyle.scss';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
-// ---------- Logger (writes to console with timestamps) ----------
+// ---------- Logger ----------
 const logger = {
   info: (message, data = null) => {
     const timestamp = new Date().toLocaleTimeString('th-TH', { hour12: false });
@@ -38,10 +41,70 @@ const logger = {
   },
 };
 
+// ---------- School Coordinates ----------
+const SCHOOL_COORDS = {
+  lat: 13.910305,
+  lng: 100.512396,
+};
+
+const SCHOOL_BOUNDS = {
+  north: 13.9130,
+  south: 13.9076,
+  east: 100.5156,
+  west: 100.5092,
+};
+
+// ---------- Fix for default marker icons ----------
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+// ---------- Custom Marker Icon ----------
+const getMarkerIcon = (issueType) => {
+  const color = issueType === 'suggestion' ? '#4CAF50' : '#f44336';
+  return L.divIcon({
+    className: 'custom-marker',
+    html: `<div style="background-color: ${color}; color: white; border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 16px; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.3);">
+      ${issueType === 'suggestion' ? '💡' : '🚨'}
+    </div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 30],
+    popupAnchor: [0, -30],
+  });
+};
+
+// ---------- FitBounds Component ----------
+function FitBounds({ markers }) {
+  const map = useMap();
+  useEffect(() => {
+    if (markers && markers.length > 0) {
+      const bounds = L.latLngBounds(markers.map(m => [m.latitude, m.longitude]));
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
+  }, [markers, map]);
+  return null;
+}
+
+// ---------- Main Component ----------
 export default function IssueCheck({ profile, viewMode, idToken }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [mapKey, setMapKey] = useState(0);
+
+  const locatedIssues = useMemo(
+    () => issues.filter(issue => issue.latitude && issue.longitude),
+    [issues]
+  );
+
+  useEffect(() => {
+    if (viewMode === 'view_others' && locatedIssues.length > 0) {
+      setMapKey(Date.now());
+    }
+  }, [locatedIssues, viewMode]);  
 
   useEffect(() => {
     const fetchIssues = async () => {
@@ -103,8 +166,7 @@ export default function IssueCheck({ profile, viewMode, idToken }) {
     fetchIssues();
   }, [profile, viewMode, idToken]);
 
-  // ... (rest of the component remains the same)
-  
+
   if (loading) {
     return (
       <div className="container">
@@ -141,6 +203,48 @@ export default function IssueCheck({ profile, viewMode, idToken }) {
         <span className="count">{issues.length} เรื่อง</span>
       </div>
 
+      {viewMode === 'view_others' && locatedIssues.length > 0 && (
+        <div className="map-container" style={{ height: '300px', marginBottom: '16px', borderRadius: '8px', overflow: 'hidden' }}>
+        <MapContainer
+          key={mapKey}
+          center={SCHOOL_COORDS}
+          zoom={17}
+          style={{ height: '100%', width: '100%' }}
+          zoomControl={true}
+          scrollWheelZoom={true}
+          dragging={true}
+        >
+          <TileLayer
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            attribution='&copy; <a href="https://www.esri.com">Esri</a>'
+            maxZoom={19}
+          />
+
+          {/* Add the same landmark the dashboard has */}
+          <Marker
+            position={[SCHOOL_COORDS.lat, SCHOOL_COORDS.lng]}
+            icon={L.divIcon({
+              className: 'school-marker',
+              html: `<div style="background-color:#3B82F6;color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:12px;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);">🏫</div>`,
+              iconSize: [20, 20],
+              iconAnchor: [10, 10],
+            })}
+          >
+            <Popup>🏫 โรงเรียน</Popup>
+          </Marker>
+
+          {locatedIssues.map((issue) => (
+            <Marker key={issue.id} position={[issue.latitude, issue.longitude]} icon={getMarkerIcon(issue.issueType)}>
+              <Popup>...</Popup>
+            </Marker>
+          ))}
+
+          {/* Only auto-fit when there are enough points that it's meaningful */}
+          {locatedIssues.length > 1 && <FitBounds markers={locatedIssues} />}
+        </MapContainer>
+        </div>
+      )}
+
       {issues.length === 0 ? (
         <div className="empty">ยังไม่มีเรื่องแจ้งในหมวดนี้</div>
       ) : (
@@ -175,24 +279,8 @@ export default function IssueCheck({ profile, viewMode, idToken }) {
               </div>
             </div>
           ))}
-
         </>
       )}
     </div>
   );
 }
-
-// Table styles
-const tableHeader = {
-  padding: '8px 12px',
-  textAlign: 'left',
-  fontWeight: 'bold',
-  color: '#374151',
-  fontSize: 13,
-};
-const tableCell = {
-  padding: '8px 12px',
-  borderBottom: '1px solid #E5E7EB',
-  color: '#4B5563',
-  fontSize: 13,
-};
