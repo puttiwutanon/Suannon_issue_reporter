@@ -2,15 +2,71 @@ import React, { useState, useEffect } from 'react';
 import liff from '@line/liff';
 import './styles/IssueFormASAPStyle.scss';
 
+// Built from the school map (แผนผังโรงเรียนสวนกุหลาบวิทยาลัย นนทบุรี).
+// Classroom buildings (สธ 1-6, 9-10) get a required floor picker, since
+// they're multi-story and "อาคารเรียน สธ 6" alone isn't specific enough.
+// Everything else is a single named spot, so no extra field is needed.
+const BUILDING_LOCATIONS = [
+  'อาคารเรียน สธ 1', 'อาคารเรียน สธ 2', 'อาคารเรียน สธ 3', 'อาคารเรียน สธ 4',
+  'อาคารเรียน สธ 5', 'อาคารเรียน สธ 6', 'อาคารเรียน สธ 9', 'อาคารเรียน สธ 10',
+];
+
+const OTHER_LOCATIONS = [
+  'สนามฟุตบอล',
+  'หอพระ',
+  'พระบรมราชานุสาวรีย์รัชกาลที่ 5',
+  'ลานอเนกประสงค์',
+  'อาคารประชาสัมพันธ์และกิจการนักเรียน',
+  'ป้อมยาม',
+  'ศูนย์ To Be Number 1',
+  'อัฒจันทร์',
+  'ห้องน้ำนักเรียน',
+  'ศาลากลางน้ำ',
+  'สวนเสริมปัญญา',
+  'หอประชุมสิรินธราลัย',
+  'ห้องสมุด',
+  'ศูนย์เกษตรกรรม',
+  'บ้านพักครู/บุคลากร',
+  'ประตูด้านหลัง',
+  'สระน้ำ',
+  'สระว่ายน้ำ',
+  'ลานจอดรถ',
+  'Suannon music studio',
+  'Suannon Ceramic',
+  'Suannon Learning mall',
+  'สวนนนท์ Coffee Shop',
+  'ร้านสหกรณ์โรงเรียน',
+  'อื่นๆ (โปรดระบุในรายละเอียด)',
+];
+
+// One lookup table keyed by building name, instead of a separate
+// if-block per building — adding/editing a building's floors is now
+// a one-line change here, and it's what actually drives the <select>.
+const FLOOR_OPTIONS = {
+  'อาคารเรียน สธ 1': ['ชั้น 1', 'ชั้น 2', 'ชั้น 3', 'ชั้น 4'],
+  'อาคารเรียน สธ 2': ['ชั้น 1', 'ชั้น 2', 'ชั้น 3', 'ชั้น 4'],
+  'อาคารเรียน สธ 3': ['ชั้น 1', 'ชั้น 2', 'ชั้น 3', 'ชั้น 4'],
+  'อาคารเรียน สธ 4': ['ชั้น 1', 'ชั้น 2', 'ชั้น 3', 'ชั้น 4'],
+  'อาคารเรียน สธ 5': ['ชั้น 1', 'ห้องวงโยธวาทิต'],
+  'อาคารเรียน สธ 6': ['ชั้น 1', 'ชั้น 2', 'ชั้น 3'],
+  'อาคารเรียน สธ 9': ['ชั้น 1', 'ชั้น 2', 'ชั้น 3', 'ชั้น 4', 'ชั้น 5'],
+  'อาคารเรียน สธ 10': ['ชั้น 1', 'ชั้น 2', 'ชั้น 3', 'ชั้น 4', 'ชั้น 5', 'ชั้น 6', 'ชั้น 7'],
+};
+
 export default function IssueFormASAP({ profile, idToken }) {
   const [category, setCategory] = useState('Facilities');
-  const [locationDetail, setLocationDetail] = useState('');
+  const [building, setBuilding] = useState('');
+  const [floor, setFloor] = useState('');
+  const [roomDetail, setRoomDetail] = useState('');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [location, setLocation] = useState({ lat: null, lng: null });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+
+  const isClassroomBuilding = BUILDING_LOCATIONS.includes(building);
+  const floorChoices = FLOOR_OPTIONS[building] || [];
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -44,8 +100,20 @@ export default function IssueFormASAP({ profile, idToken }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Belt-and-suspenders: `required` on the selects covers most cases,
+    // but classroom buildings also need a floor picked.
+    if (isClassroomBuilding && !floor) {
+      setStatusMsg('❌ กรุณาเลือกชั้นด้วย');
+      return;
+    }
+
     setIsSubmitting(true);
     setStatusMsg('กำลังส่งข้อมูล...');
+
+    const locationDetail = isClassroomBuilding
+      ? `${building} ${floor}${roomDetail.trim() ? ` ห้อง ${roomDetail.trim()}` : ''}`
+      : building;
 
     const formData = new FormData();
     formData.append('lineIdToken', idToken);
@@ -62,7 +130,7 @@ export default function IssueFormASAP({ profile, idToken }) {
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       console.log('📤 Sending to:', apiUrl);
-      
+
       const res = await fetch(`${apiUrl}/api/issues?ngrok-skip-browser-warning=true`, {
         method: 'POST',
         body: formData,
@@ -98,9 +166,9 @@ export default function IssueFormASAP({ profile, idToken }) {
         <form onSubmit={handleSubmit}>
           <div className="field">
             <label className="label">หมวดหมู่ปัญหา</label>
-            <select 
-              value={category} 
-              onChange={(e) => setCategory(e.target.value)} 
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
               className="input"
             >
               <option value="Facilities">🪑 อาคารสถานที่</option>
@@ -112,14 +180,58 @@ export default function IssueFormASAP({ profile, idToken }) {
 
           <div className="field">
             <label className="label">สถานที่ที่พบปัญหา</label>
-            <textarea
-              value={locationDetail}
-              onChange={(e) => setLocationDetail(e.target.value)}
+            <select
+              value={building}
+              onChange={(e) => {
+                setBuilding(e.target.value);
+                setFloor('');
+                setRoomDetail('');
+              }}
               required
-              rows={2}
-              className="input textarea"
-              placeholder="ระบุสถานที่หรือห้องที่พบปัญหา เช่น ห้อง10402, ห้องน้ำชายตึก10 ชั้น 5..."
-            />
+              className="input"
+            >
+              <option value="" disabled>-- เลือกสถานที่ --</option>
+              <optgroup label="อาคารเรียน">
+                {BUILDING_LOCATIONS.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </optgroup>
+              <optgroup label="สถานที่อื่นๆ">
+                {OTHER_LOCATIONS.map((loc) => (
+                  <option key={loc} value={loc}>{loc}</option>
+                ))}
+              </optgroup>
+            </select>
+
+            {/* The floor picker only makes sense once a classroom
+                building with a known floor list is selected — and it
+                needs its own <select>, since <optgroup> can't stand
+                on its own outside one. */}
+            {isClassroomBuilding && floorChoices.length > 0 && (
+              <select
+                value={floor}
+                onChange={(e) => setFloor(e.target.value)}
+                required
+                className="input"
+                style={{ marginTop: '8px' }}
+              >
+                <option value="" disabled>-- เลือกชั้น --</option>
+                {floorChoices.map((f) => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+            )}
+
+            {isClassroomBuilding && floor && (
+              <input
+                type="text"
+                value={roomDetail}
+                onChange={(e) => setRoomDetail(e.target.value)}
+                className="input"
+                style={{ marginTop: '8px' }}
+                placeholder="ระบุเลขห้อง (ถ้ามี) เช่น 01 02 03"
+              />
+            )}
           </div>
 
           <div className="field">
@@ -145,20 +257,20 @@ export default function IssueFormASAP({ profile, idToken }) {
                   แตะเพื่อถ่ายรูป
                 </div>
               )}
-              <input 
-                type="file" 
-                accept="image/*" 
+              <input
+                type="file"
+                accept="image/*"
                 capture="environment"   // <-- Forces camera, no gallery
-                onChange={handleImageChange} 
-                style={{ display: 'none' }} 
+                onChange={handleImageChange}
+                style={{ display: 'none' }}
               />
             </label>
           </div>
 
           <div className="location-box">
             <span className="pin">📍</span>
-            {location.lat 
-              ? `ตำแหน่งของคุณ: ${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}` 
+            {location.lat
+              ? `ตำแหน่งของคุณ: ${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`
               : 'กำลังค้นหาตำแหน่ง...'
             }
           </div>
