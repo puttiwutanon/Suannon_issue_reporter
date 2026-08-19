@@ -229,7 +229,7 @@ export default function IssueFormASAP({ profile, idToken }) {
                 onChange={(e) => setRoomDetail(e.target.value)}
                 className="input"
                 style={{ marginTop: '8px' }}
-                placeholder="ระบุเลขห้อง (ถ้ามี) เช่น 01 02 03"
+                placeholder="ระบุเลขห้อง (ถ้ามี) เช่น 2301 1402 9303"
               />
             )}
           </div>

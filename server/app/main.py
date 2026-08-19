@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .config import CORS_ORIGINS, CORS_ORIGIN_REGEX, limiter
-from .router import issues, reports
+from .router import issues
 from . import webhook
 from .scheduler import scheduler, start_scheduler
 from slowapi.errors import RateLimitExceeded
@@ -28,7 +28,6 @@ app.add_middleware(
 
 # Routers
 app.include_router(issues.router)
-app.include_router(reports.router)
 app.include_router(webhook.router)
 
 

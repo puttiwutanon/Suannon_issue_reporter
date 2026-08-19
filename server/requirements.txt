@@ -1,8 +1,12 @@
 fastapi
 uvicorn
 python-multipart
-cloudinary
-psycopg2-binary
+boto3
+httpx
 python-dotenv
 apscheduler==3.10.4
 slowapi==0.1.4
+firebase-admin
+line-bot-sdk
+gspread
+google-auth

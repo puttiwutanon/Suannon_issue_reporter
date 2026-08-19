@@ -1,46 +1,45 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Request, UploadFile, File, Form, HTTPException, status, Query
-import cloudinary.uploader
 from linebot.models import TextSendMessage, ImageSendMessage
 from ..firebase_auth import require_admin
 from ..line_auth import verify_line_id_token
 from ..config import logger
-from ..db import get_db_connection
+from .. import db
+from .. import r2_client
+from .. import sheets_client
 from ..line_client import line_bot_api
 from ..config import limiter
 
 router = APIRouter(prefix="/api", tags=["issues"])
 
-def _row_to_issue(row):
+
+def _row_to_issue(row: dict):
+    # D1 returns rows as dicts already, so this just renames keys to
+    # match the camelCase shape the frontend expects.
     return {
-        "id": row[0],
-        "lineUserId": row[1],
-        "reporterName": row[2],
-        "category": row[3],
-        "description": row[4],
-        "imageUrl": row[5],
-        "latitude": float(row[6]) if row[6] else None,
-        "longitude": float(row[7]) if row[7] else None,
-        "status": row[8],
-        "createdAt": str(row[9]),
-        "studentYear": row[10] if len(row) > 10 else None,
-        "studentClass": row[11] if len(row) > 11 else None,
-        "studentNumber": row[12] if len(row) > 12 else None,
-        "issueType": row[13] if len(row) > 13 else None,
-        "fixImageUrl": row[14] if len(row) > 14 else None,
-        "resolvedAt": str(row[15]) if len(row) > 15 and row[15] else None,
+        "id": row["id"],
+        "lineUserId": row["line_user_id"],
+        "reporterName": row["reporter_name"],
+        "category": row["category"],
+        "description": row["description"],
+        "imageUrl": row["image_url"],
+        "latitude": row["latitude"],
+        "longitude": row["longitude"],
+        "status": row["status"],
+        "createdAt": row["created_at"],
+        "studentYear": row.get("student_year"),
+        "studentClass": row.get("student_class"),
+        "studentNumber": row.get("student_number"),
+        "issueType": row.get("issue_type"),
+        "fixImageUrl": row.get("fix_image_url"),
+        "resolvedAt": row.get("resolved_at"),
     }
 
 
 # ---------- GET /api/issues (Admin Only) ----------
 @router.get("/issues")
 async def get_issues(admin=Depends(require_admin)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM issues ORDER BY created_at DESC")
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
+    rows = db.fetch_all("SELECT * FROM issues ORDER BY created_at DESC")
     issues = [_row_to_issue(row) for row in rows]
     return {"success": True, "issues": issues}
 
@@ -48,24 +47,19 @@ async def get_issues(admin=Depends(require_admin)):
 # ---------- GET /api/issues/community (LIFF Users) ----------
 @router.get("/issues/community")
 async def get_community_issues(
-    view_mode: str = "mine", 
+    view_mode: str = "mine",
     line_user=Depends(verify_line_id_token)
 ):
-    conn = get_db_connection()
-    cursor = conn.cursor()
     if view_mode == "mine":
-        cursor.execute(
-            "SELECT * FROM issues WHERE line_user_id = %s ORDER BY created_at DESC",
-            (line_user["userId"],)
+        rows = db.fetch_all(
+            "SELECT * FROM issues WHERE line_user_id = ? ORDER BY created_at DESC",
+            [line_user["userId"]]
         )
     else:
-        cursor.execute(
-            "SELECT * FROM issues WHERE line_user_id != %s ORDER BY created_at DESC",
-            (line_user["userId"],)
+        rows = db.fetch_all(
+            "SELECT * FROM issues WHERE line_user_id != ? ORDER BY created_at DESC",
+            [line_user["userId"]]
         )
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
     issues = [_row_to_issue(row) for row in rows]
     return {"success": True, "issues": issues}
 
@@ -91,38 +85,36 @@ async def resolve_issue(
 
     try:
         _validate_image(fix_image)
-        logger.info(f"📤 Uploading fix image to Cloudinary: {fix_image.filename}")
-        upload_result = cloudinary.uploader.upload(
-            fix_image.file,
-            folder="school_issues/fixed"
-        )
-        fix_image_url = upload_result.get("secure_url")
+        logger.info(f"📤 Uploading fix image to R2: {fix_image.filename}")
+        fix_image_url = r2_client.upload_image(fix_image.file, folder="school_issues/fixed")
         logger.info(f"✅ Fix image uploaded: {fix_image_url}")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"❌ Cloudinary error: {e}", exc_info=True)
+        logger.error(f"❌ R2 error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to upload fix image")
 
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
         query = """
-            UPDATE issues 
-            SET status = 'resolved', 
-                fix_image_url = %s, 
-                resolved_at = NOW()
-            WHERE id = %s
-            RETURNING line_user_id, reporter_name, category, description;
+            UPDATE issues
+            SET status = 'resolved',
+                fix_image_url = ?,
+                resolved_at = datetime('now')
+            WHERE id = ?
+            RETURNING line_user_id, reporter_name, category, description, resolved_at;
         """
-        cursor.execute(query, (fix_image_url, issue_id))
-        result = cursor.fetchone()
+        result = db.execute(query, [fix_image_url, issue_id])
         if not result:
             raise HTTPException(status_code=404, detail="Issue not found")
 
-        line_user_id, reporter_name, category, description = result
-        conn.commit()
-        cursor.close()
-        conn.close()
+        line_user_id = result["line_user_id"]
+        reporter_name = result["reporter_name"]
+        category = result["category"]
+        description = result["description"]
+
+        # Best-effort — updates the permanent log so it reflects the
+        # outcome, but never blocks the resolve action if Sheets is down.
+        sheets_client.mark_issue_resolved(issue_id, result["resolved_at"], fix_image_url)
 
         try:
             text_msg = TextSendMessage(
@@ -152,6 +144,8 @@ async def resolve_issue(
             "message": "Issue resolved and notification sent",
             "fixImageUrl": fix_image_url
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ Resolve error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -179,7 +173,7 @@ async def create_issue(
     # Use token display name if reporterName not provided
     if not reporterName:
         reporterName = line_user.get("displayName", "ผู้ใช้ LINE")
-    
+
     logger.info(f"📝 POST /api/issues - User: {lineUserId}, Type: {issue_type}, Category: {category}")
     logger.info(f"📝 Reporter: {reporterName}, Description length: {len(description) if description else 0}")
     logger.info(f"📝 Student: {studentYear}/{studentClass}/{studentNumber}")
@@ -198,43 +192,37 @@ async def create_issue(
     if image:
         _validate_image(image)
         try:
-            logger.info(f"📤 Uploading image to Cloudinary: {image.filename}")
-            upload_result = cloudinary.uploader.upload(
-                image.file,
-                folder="school_issues"
-            )
-            image_url = upload_result.get("secure_url")
+            logger.info(f"📤 Uploading image to R2: {image.filename}")
+            image_url = r2_client.upload_image(image.file, folder="school_issues")
             logger.info(f"✅ Image uploaded: {image_url}")
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"❌ Cloudinary error: {e}", exc_info=True)
+            logger.error(f"❌ R2 error: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to upload image")
 
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
         query = """
-            INSERT INTO issues 
-            (line_user_id, reporter_name, category, description, image_url, 
+            INSERT INTO issues
+            (line_user_id, reporter_name, category, description, image_url,
              latitude, longitude, student_year, student_class, student_number, issue_type)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, line_user_id, reporter_name, category, description, 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id, line_user_id, reporter_name, category, description,
                       image_url, latitude, longitude, status, created_at,
                       student_year, student_class, student_number, issue_type;
         """
-        values = (
+        values = [
             lineUserId, reporterName, category, description, image_url,
             latitude, longitude, studentYear, studentClass, studentNumber,
             issue_type
-        )
+        ]
 
         logger.info(f"💾 Inserting issue into database...")
-        cursor.execute(query, values)
-        new_row = cursor.fetchone()
-        conn.commit()
-        logger.info(f"✅ Issue inserted with ID: {new_row[0]}")
-        cursor.close()
-        conn.close()
+        new_row = db.execute(query, values)
+        logger.info(f"✅ Issue inserted with ID: {new_row['id']}")
+
+        # Best-effort permanent log — never blocks the reporter if Sheets is down.
+        sheets_client.append_issue_row(new_row)
 
         try:
             if issue_type == 'suggestion':
@@ -253,23 +241,10 @@ async def create_issue(
 
         return {
             "success": True,
-            "issue": {
-                "id": new_row[0],
-                "lineUserId": new_row[1],
-                "reporterName": new_row[2],
-                "category": new_row[3],
-                "description": new_row[4],
-                "imageUrl": new_row[5],
-                "latitude": float(new_row[6]) if new_row[6] else None,
-                "longitude": float(new_row[7]) if new_row[7] else None,
-                "status": new_row[8],
-                "createdAt": str(new_row[9]),
-                "studentYear": new_row[10],
-                "studentClass": new_row[11],
-                "studentNumber": new_row[12],
-                "issueType": new_row[13],
-            }
+            "issue": _row_to_issue(new_row)
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ Database error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Database insertion error: {str(e)}")
