@@ -28,6 +28,29 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
+// ---------- Status labels (shared shape with IssueCheck.jsx) ----------
+// pending      -> just submitted, nobody's looked at it yet
+// acknowledged -> team has seen it and told the reporter they're on it
+// in_progress  -> team is actively fixing, progress photo attached
+// resolved     -> done
+const STATUS_LABELS = {
+  pending: { text: '⏳ รอดำเนินการ', className: 'pending' },
+  acknowledged: { text: '📨 รับเรื่องแล้ว', className: 'acknowledged' },
+  in_progress: { text: '🔧 กำลังซ่อม', className: 'in_progress' },
+  resolved: { text: '✅ เสร็จสิ้น', className: 'resolved' },
+};
+function getStatusLabel(status) {
+  return STATUS_LABELS[status] || STATUS_LABELS.pending;
+}
+
+// Ordered so we can find "how far along" an issue is for the stepper.
+const PROGRESS_STEPS = [
+  { status: 'pending', label: 'รอรับเรื่อง' },
+  { status: 'acknowledged', label: 'รับเรื่องแล้ว' },
+  { status: 'in_progress', label: 'กำลังซ่อม' },
+  { status: 'resolved', label: 'เสร็จสิ้น' },
+];
+
 // Component to handle map restrictions and centering
 function MapRestrictions({ bounds, center, zoom, markers }) {
   const map = useMap();
@@ -90,7 +113,8 @@ const getMarkerIcon = (issueType) => {
 // Memoized Marker component
 const MemoizedMarker = React.memo(({ issue, setSelectedIssue }) => {
   const icon = useMemo(() => getMarkerIcon(issue.issueType), [issue.issueType]);
-  
+  const statusLabel = getStatusLabel(issue.status);
+
   return (
     <Marker
       position={[issue.latitude, issue.longitude]}
@@ -106,8 +130,8 @@ const MemoizedMarker = React.memo(({ issue, setSelectedIssue }) => {
           <small>ผู้แจ้ง: {issue.reporterName}</small><br />
           <small>{new Date(issue.createdAt).toLocaleString('th-TH')}</small>
           <br />
-          <span className={`status-badge ${issue.status}`}>
-            {issue.status === 'pending' ? '⏳ รอดำเนินการ' : '✅ เสร็จสิ้น'}
+          <span className={`status-badge ${statusLabel.className}`}>
+            {statusLabel.text}
           </span>
         </div>
       </Popup>
@@ -129,6 +153,18 @@ function IssueDashboard() {
   const [fixFile, setFixFile] = useState(null);
   const [fixPreview, setFixPreview] = useState(null);
   const [fixing, setFixing] = useState(false);
+
+  // The issue currently open in the fix modal. Derived from `issues`
+  // (not a separate snapshot) so its `status` is always fresh right
+  // after fetchIssues() runs post-update — the stepper reads directly
+  // off this, so it advances automatically without extra state to sync.
+  const fixIssue = useMemo(
+    () => issues.find((i) => i.id === selectedIssueId) || null,
+    [issues, selectedIssueId]
+  );
+  const currentStepIndex = fixIssue
+    ? PROGRESS_STEPS.findIndex((s) => s.status === fixIssue.status)
+    : -1;
 
   const handleLogout = useCallback(async () => {
     if (window.confirm('คุณต้องการออกจากระบบใช่หรือไม่?')) {
@@ -155,40 +191,6 @@ function IssueDashboard() {
     }
   };
 
-  const handleSubmitFix = async () => {
-    if (!fixFile) { alert('กรุณาเลือกรูปภาพ'); return; }
-    setFixing(true);
-    try {
-      const apiUrl = 'http://localhost:8000';
-      const token = await getIdToken();
-      const formData = new FormData();
-      formData.append('fix_image', fixFile);
-
-      const res = await fetch(`${apiUrl}/api/issues/${selectedIssueId}/resolve`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!res.ok) throw new Error('Failed to resolve issue');
-      const data = await res.json();
-      if (data.success) {
-        alert('✅ แจ้งว่าซ่อมแล้วสำเร็จ!');
-        setShowFixModal(false);
-        setFixFile(null);
-        setFixPreview(null);
-        setSelectedIssueId(null);
-        fetchIssues();
-      } else {
-        alert('❌ เกิดข้อผิดพลาด');
-      }
-    } catch (err) {
-      console.error(err);
-      alert('❌ ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์');
-    } finally {
-      setFixing(false);
-    }
-  };
-
   const fetchIssues = useCallback(async () => {
     try {
       const apiUrl = 'http://localhost:8000';
@@ -211,6 +213,63 @@ function IssueDashboard() {
       setLoading(false);
     }
   }, []);
+
+  // Moves an issue to the next status in the flow.
+  //   pending -> acknowledged      : no image needed
+  //   acknowledged -> in_progress  : requires the "fixing in progress" photo
+  //   in_progress -> resolved      : final confirmation, no new photo needed
+  //
+  // NOTE (backend dependency): this calls
+  //   POST /api/issues/{id}/status   body: FormData { status, image? }
+  // Your backend needs a route that accepts these 4 status values and
+  // stores the optional image (e.g. as `progressImageUrl`) — this
+  // replaces the old single-shot /resolve endpoint. If your backend
+  // isn't set up for this yet, this call will 404/fail until it is.
+  const handleAdvanceStatus = async (nextStatus, { requireImage = false } = {}) => {
+    if (requireImage && !fixFile) {
+      alert('กรุณาแนบรูปภาพก่อนดำเนินการต่อ');
+      return;
+    }
+
+    setFixing(true);
+    try {
+      const apiUrl = 'http://localhost:8000';
+      const token = await getIdToken();
+      const formData = new FormData();
+      formData.append('status', nextStatus);
+      if (fixFile) formData.append('image', fixFile);
+
+      const res = await fetch(`${apiUrl}/api/issues/${selectedIssueId}/status`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!res.ok) throw new Error('Failed to update status: ' + res.status);
+      const data = await res.json();
+      if (!data.success) throw new Error('API returned success: false');
+
+      await fetchIssues();
+      setFixFile(null);
+      setFixPreview(null);
+
+      if (nextStatus === 'resolved') {
+        setShowFixModal(false);
+        setSelectedIssueId(null);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('❌ ไม่สามารถอัปเดตสถานะได้ กรุณาลองใหม่');
+    } finally {
+      setFixing(false);
+    }
+  };
+
+  const handleCloseFixModal = () => {
+    setShowFixModal(false);
+    setSelectedIssueId(null);
+    setFixFile(null);
+    setFixPreview(null);
+  };
 
   useEffect(() => {
     fetchIssues();
@@ -243,7 +302,7 @@ function IssueDashboard() {
       total: issues.length,
       urgent: issues.filter(i => i.issueType === 'urgent').length,
       suggestion: issues.filter(i => i.issueType === 'suggestion').length,
-      pending: issues.filter(i => i.status === 'pending').length,
+      pending: issues.filter(i => i.status !== 'resolved').length,
       resolved: issues.filter(i => i.status === 'resolved').length,
     };
   }, [issues]);
@@ -420,63 +479,67 @@ function IssueDashboard() {
         {filteredIssues.length === 0 ? (
           <div className="empty-state">ไม่มีรายการที่ตรงกับเงื่อนไข</div>
         ) : (
-          filteredIssues.map((issue) => (
-            <div 
-              key={issue.id} 
-              className={`issue-card ${issue.issueType === 'suggestion' ? 'suggestion' : 'urgent'}`}
-              onClick={() => setSelectedIssue(issue)}
-            >
-              <div className="issue-header">
-                <div className="issue-badge">
-                  {issue.issueType === 'suggestion' ? '💡' : '🚨'}
-                  <span className={`type-badge ${issue.issueType}`}>
-                    {issue.issueType === 'suggestion' ? 'ข้อเสนอแนะ' : 'แจ้งด่วน'}
-                  </span>
+          filteredIssues.map((issue) => {
+            const statusLabel = getStatusLabel(issue.status);
+            return (
+              <div 
+                key={issue.id} 
+                className={`issue-card ${issue.issueType === 'suggestion' ? 'suggestion' : 'urgent'}`}
+                onClick={() => setSelectedIssue(issue)}
+              >
+                <div className="issue-header">
+                  <div className="issue-badge">
+                    {issue.issueType === 'suggestion' ? '💡' : '🚨'}
+                    <span className={`type-badge ${issue.issueType}`}>
+                      {issue.issueType === 'suggestion' ? 'ข้อเสนอแนะ' : 'แจ้งด่วน'}
+                    </span>
+                  </div>
+                  <div className="issue-meta">
+                    <span className="category-badge">{issue.category}</span>
+                    <span className={`status-badge ${statusLabel.className}`}>
+                      {statusLabel.text}
+                    </span>
+                  </div>
                 </div>
-                <div className="issue-meta">
-                  <span className="category-badge">{issue.category}</span>
-                  <span className={`status-badge ${issue.status}`}>
-                    {issue.status === 'pending' ? '⏳ รอดำเนินการ' : '✅ เสร็จสิ้น'}
-                  </span>
+                
+                {issue.topic && <div className="issue-topic">เรื่อง: {issue.topic}</div>}
+                <div className="issue-body">
+                  <p className="issue-description">{issue.description}</p>
+                  {issue.imageUrl && (
+                    <img src={issue.imageUrl} alt="Issue" className="issue-thumbnail" />
+                  )}
                 </div>
-              </div>
-              
-              <div className="issue-body">
-                <p className="issue-description">{issue.description}</p>
-                {issue.imageUrl && (
-                  <img src={issue.imageUrl} alt="Issue" className="issue-thumbnail" />
-                )}
-              </div>
-              
-              <div className="issue-footer">
-                <span className="reporter">👤 {issue.reporterName}</span>
-                {issue.studentYear && (
-                  <span className="student-info">
-                    ชั้น {issue.studentYear}/{issue.studentClass} เลขที่ {issue.studentNumber}
+                
+                <div className="issue-footer">
+                  <span className="reporter">👤 {issue.reporterName}</span>
+                  {issue.studentYear && (
+                    <span className="student-info">
+                      ชั้น {issue.studentYear}/{issue.studentClass} เลขที่ {issue.studentNumber}
+                    </span>
+                  )}
+                  <span className="date">
+                    {new Date(issue.createdAt).toLocaleString('th-TH')}
                   </span>
-                )}
-                <span className="date">
-                  {new Date(issue.createdAt).toLocaleString('th-TH')}
-                </span>
-                {issue.latitude && (
-                  <span className="location">📍 มีตำแหน่งที่ตั้ง</span>
-                )}
+                  {issue.latitude && (
+                    <span className="location">📍 มีตำแหน่งที่ตั้ง</span>
+                  )}
 
-                {issue.status === 'pending' && issue.issueType === 'urgent' && (
-                  <button 
-                    className="fix-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedIssueId(issue.id);
-                      setShowFixModal(true);
-                    }}
-                  >
-                    🔧 แจ้งว่าแก้ไขแล้ว
-                  </button>
-                )}
+                  {issue.status !== 'resolved' && issue.issueType === 'urgent' && (
+                    <button 
+                      className="fix-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedIssueId(issue.id);
+                        setShowFixModal(true);
+                      }}
+                    >
+                      🔧 ดำเนินการ
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
@@ -486,13 +549,14 @@ function IssueDashboard() {
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setSelectedIssue(null)}>✕</button>
             <h3>{selectedIssue.category}</h3>
+            <h3>{selectedIssue.topic}</h3>
             <p><strong>ประเภท:</strong> {selectedIssue.issueType === 'suggestion' ? 'ข้อเสนอแนะ' : 'แจ้งด่วน'}</p>
             <p><strong>รายละเอียด:</strong> {selectedIssue.description}</p>
             <p><strong>ผู้แจ้ง:</strong> {selectedIssue.reporterName}</p>
             {selectedIssue.studentYear && (
               <p><strong>นักเรียน:</strong> ชั้น {selectedIssue.studentYear}/{selectedIssue.studentClass} เลขที่ {selectedIssue.studentNumber}</p>
             )}
-            <p><strong>สถานะ:</strong> {selectedIssue.status === 'pending' ? '⏳ รอดำเนินการ' : '✅ เสร็จสิ้น'}</p>
+            <p><strong>สถานะ:</strong> {getStatusLabel(selectedIssue.status).text}</p>
             <p><strong>วันที่:</strong> {new Date(selectedIssue.createdAt).toLocaleString('th-TH')}</p>
             {selectedIssue.latitude && (
               <p><strong>📍 ตำแหน่ง:</strong> {selectedIssue.latitude}, {selectedIssue.longitude}</p>
@@ -500,64 +564,102 @@ function IssueDashboard() {
             {selectedIssue.imageUrl && (
               <img src={selectedIssue.imageUrl} alt="Issue" className="modal-image" />
             )}
+            {selectedIssue.progressImageUrl && (
+              <>
+                <p><strong>📸 ภาพระหว่างดำเนินการซ่อม:</strong></p>
+                <img src={selectedIssue.progressImageUrl} alt="Fix in progress" className="modal-image" />
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {/* ---------- Fix Modal ---------- */}
-      {showFixModal && (
-        <div className="modal-overlay" onClick={() => setShowFixModal(false)}>
+      {/* ---------- Fix / Progress Modal ---------- */}
+      {showFixModal && fixIssue && (
+        <div className="modal-overlay" onClick={handleCloseFixModal}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowFixModal(false)}>✕</button>
-            <h3>📸 แจ้งว่าซ่อมแล้ว</h3>
-            <p>อัปโหลดภาพหลังซ่อม (ถ่ายรูปใหม่เท่านั้น)</p>
-            <label 
-              htmlFor="fixFileInput" 
-              className="upload-area" 
-              style={{ 
-                border: '2px dashed #D1D5DB', 
-                borderRadius: '8px', 
-                padding: '20px', 
-                textAlign: 'center', 
-                cursor: 'pointer',
-                display: 'block'
-              }}
-            >
-              {fixPreview ? (
-                <img src={fixPreview} alt="Preview" style={{ maxWidth: '100%', maxHeight: '200px' }} />
-              ) : (
-                <>
-                  <div style={{ fontSize: '40px' }}>📷</div>
-                  <p>แตะเพื่อถ่ายรูปหรือเลือกไฟล์</p>
-                </>
-              )}
-              <input 
-                type="file" 
-                accept="image/*" 
-                capture="environment" 
-                onChange={handleFixImageChange} 
-                style={{ display: 'none' }}
-                id="fixFileInput"
-              />
-            </label>
-            <button 
-              onClick={handleSubmitFix} 
-              disabled={fixing || !fixFile}
-              style={{
-                width: '100%',
-                padding: '12px',
-                background: fixing ? '#9CA3AF' : '#06C755',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '16px',
-                fontWeight: 'bold',
-                cursor: fixing ? 'not-allowed' : 'pointer',
-                marginTop: '12px'
-              }}
-            >
-              {fixing ? 'กำลังส่ง...' : 'ยืนยันการซ่อม'}
-            </button>
+            <button className="modal-close" onClick={handleCloseFixModal}>✕</button>
+            <h3>🔧 ดำเนินการแก้ไข</h3>
+            <p className="issue-summary">{fixIssue.description}</p>
+
+            {/* Stepper */}
+            <div className="fix-stepper">
+              {PROGRESS_STEPS.map((step, idx) => {
+                const state =
+                  idx < currentStepIndex ? 'done' : idx === currentStepIndex ? 'active' : 'upcoming';
+                return (
+                  <div key={step.status} className={`fix-stepper-item ${state}`}>
+                    <div className="fix-stepper-circle">{idx < currentStepIndex ? '✓' : idx + 1}</div>
+                    <div className="fix-stepper-label">{step.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Step body — changes based on the issue's current status */}
+            {fixIssue.status === 'pending' && (
+              <div className="fix-step-body">
+                <p>แจ้งผู้แจ้งว่าทีมงานได้รับเรื่องแล้ว และกำลังดำเนินการ</p>
+                <button
+                  onClick={() => handleAdvanceStatus('acknowledged')}
+                  disabled={fixing}
+                  className="fix-btn"
+                >
+                  {fixing ? 'กำลังส่ง...' : '📨 แจ้งว่าได้รับเรื่องแล้ว'}
+                </button>
+              </div>
+            )}
+
+            {fixIssue.status === 'acknowledged' && (
+              <div className="fix-step-body">
+                <p>อัปโหลดภาพระหว่างดำเนินการซ่อม แล้วยืนยันว่าทีมงานเริ่มซ่อมแล้ว</p>
+                <label htmlFor="fixFileInput" className="upload-area fix-upload-area">
+                  {fixPreview ? (
+                    <img src={fixPreview} alt="Preview" className="fix-preview-image" />
+                  ) : (
+                    <>
+                      <div className="icon">📷</div>
+                      <p>แตะเพื่อถ่ายรูปหรือเลือกไฟล์</p>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFixImageChange}
+                    style={{ display: 'none' }}
+                    id="fixFileInput"
+                  />
+                </label>
+                <button
+                  onClick={() => handleAdvanceStatus('in_progress', { requireImage: true })}
+                  disabled={fixing || !fixFile}
+                  className="fix-btn"
+                >
+                  {fixing ? 'กำลังส่ง...' : '🔧 เริ่มดำเนินการซ่อม'}
+                </button>
+              </div>
+            )}
+
+            {fixIssue.status === 'in_progress' && (
+              <div className="fix-step-body">
+                {(fixPreview || fixIssue.progressImageUrl) && (
+                  <img
+                    src={fixPreview || fixIssue.progressImageUrl}
+                    alt="Fix in progress"
+                    className="fix-preview-image"
+                  />
+                )}
+                <p>ทีมงานกำลังดำเนินการซ่อม เมื่อซ่อมเสร็จให้กดยืนยันด้านล่าง</p>
+                <button
+                  onClick={() => handleAdvanceStatus('resolved')}
+                  disabled={fixing}
+                  className="fix-btn resolve"
+                >
+                  {fixing ? 'กำลังส่ง...' : '✅ ยืนยันว่าซ่อมเสร็จสมบูรณ์'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

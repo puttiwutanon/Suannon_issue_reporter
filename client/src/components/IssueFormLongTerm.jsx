@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import liff from '@line/liff';
 import './styles/IssueFormLongTermStyle.scss';
 
-export default function IssueFormASAP({ profile, idToken }) {  
+export default function IssueFormLongTerm({ profile, idToken }) {  
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [year, setYear] = useState('');
   const [studentClass, setStudentClass] = useState('');
   const [studentNumber, setStudentNumber] = useState('');
+  const [topic, setTopic] = useState('');
   const [message, setMessage] = useState('');
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -30,6 +31,7 @@ export default function IssueFormASAP({ profile, idToken }) {
     const formData = new FormData();
     formData.append('lineIdToken', idToken);
     formData.append('reporterName', `${firstName} ${lastName}`);
+    formData.append('topic', topic);
     formData.append('category', 'Suggestion');
     formData.append('description', message);
     formData.append('studentYear', year);
@@ -126,6 +128,18 @@ export default function IssueFormASAP({ profile, idToken }) {
                 placeholder="เลขที่"
               />
             </div>
+          </div>
+
+          <div className="field">
+            <label className="label">เรื่อง</label>
+            <textarea
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              required
+              rows={1}
+              className="input textarea"
+              placeholder="อยากแนะนำเรื่อง..."
+            />
           </div>
 
           <div className="field">

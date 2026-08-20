@@ -100,3 +100,18 @@
     border: 1px solid #E5E7EB;
   }
 }
+
+.status {
+  &.pending {
+    color: #9CA3AF;
+  }
+  &.acknowledged {
+    color: #1D4ED8;
+  }
+  &.in_progress {
+    color: #B45309;
+  }
+  &.resolved {
+    color: #06C755;
+  }
+}

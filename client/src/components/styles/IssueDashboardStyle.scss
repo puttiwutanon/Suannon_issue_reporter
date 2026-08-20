@@ -264,6 +264,7 @@
   border-radius: 20px;
   background: #E5E7EB;
   color: #374151;
+  margin: 0px 6px;
 }
 
 .status-badge {
@@ -773,5 +774,66 @@
 
   &:hover {
     background: #4B5563;
+  }
+}
+
+.status-badge {
+  &.acknowledged {
+    background-color: #DBEAFE;
+    color: #1D4ED8;
+  }
+  &.in_progress {
+    background-color: #FEF3C7;
+    color: #B45309;
+  }
+}
+ 
+// ---------- Fix modal: issue summary line ----------
+.issue-summary {
+  color: #6B7280;
+  font-size: 14px;
+  margin: 4px 0 16px;
+  line-height: 1.4;
+}
+
+.fix-stepper{
+  .fix-stepper-item{
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
+.fix-step-body{
+  margin-top: 16px;
+  border-radius: 12px;
+  input{
+    width: 100%;
+    padding: 8px 12px 8px 12px;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 12px;
+
+    &:focus {
+      outline: none;
+      border-color: #06C755;
+    }
+  }
+  button{
+    padding: 8px 16px;
+    background: #3B82F6;
+    color: white;
+    border: none;
+    border-radius: 20px;
+    font-size: 12px;
+    margin-top: 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+    margin-left: auto;
+
+    &:hover {
+      background: #2563EB;
+    }
   }
 }

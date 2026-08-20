@@ -62,6 +62,21 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
+// ---------- Status labels (must match IssueDashboard.jsx) ----------
+// pending      -> just submitted, nobody's looked at it yet
+// acknowledged -> team has seen it and is on it
+// in_progress  -> team is actively fixing, progress photo attached
+// resolved     -> done
+const STATUS_LABELS = {
+  pending: { text: '⏳ รอดำเนินการ', className: 'pending' },
+  acknowledged: { text: '📨 ทีมงานรับเรื่องแล้ว', className: 'acknowledged' },
+  in_progress: { text: '🔧 กำลังดำเนินการซ่อม', className: 'in_progress' },
+  resolved: { text: '✅ เสร็จสิ้น', className: 'resolved' },
+};
+function getStatusLabel(status) {
+  return STATUS_LABELS[status] || STATUS_LABELS.pending;
+}
+
 // ---------- Custom Marker Icon ----------
 const getMarkerIcon = (issueType) => {
   const color = issueType === 'suggestion' ? '#4CAF50' : '#f44336';
@@ -250,35 +265,41 @@ export default function IssueCheck({ profile, viewMode, idToken }) {
       ) : (
         <>
           {/* ---------- Card View ---------- */}
-          {issues.map((issue) => (
-            <div key={issue.id} className="card">
-              <div className="card-header">
-                <span className="category">#{issue.category}</span>
-                <span className="status">
-                  {issue.status === 'pending' ? '⏳ รอดำเนินการ' : '✅ เสร็จสิ้น'}
-                </span>
-              </div>
-              <div className="card-body">
-                {issue.imageUrl && (
-                  <img src={issue.imageUrl} alt="issue" className="thumb" />
-                )}
-                <div className="card-content">
-                  <p className="desc">{issue.description}</p>
-                  <p className="meta">
-                    {issue.reporterName} · {new Date(issue.createdAt).toLocaleDateString('th-TH')}
-                  </p>
-                  {issue.studentYear && (
+          {issues.map((issue) => {
+            const statusLabel = getStatusLabel(issue.status);
+            return (
+              <div key={issue.id} className="card">
+                <div className="card-header">
+                  <span className="category">#{issue.category}</span>
+                  <span className={`status ${statusLabel.className}`}>
+                    {statusLabel.text}
+                  </span>
+                </div>
+                <div className="card-body">
+                  {issue.imageUrl && (
+                    <img src={issue.imageUrl} alt="issue" className="thumb" />
+                  )}
+                  <div className="card-content">
+                    <p className="desc">{issue.description}</p>
                     <p className="meta">
-                      ชั้น {issue.studentYear}/{issue.studentClass} เลขที่ {issue.studentNumber}
+                      {issue.reporterName} · {new Date(issue.createdAt).toLocaleDateString('th-TH')}
                     </p>
-                  )}
-                  {issue.latitude && (
-                    <p className="meta">📍 {issue.latitude.toFixed(5)}, {issue.longitude.toFixed(5)}</p>
-                  )}
+                    {issue.studentYear && (
+                      <p className="meta">
+                        ชั้น {issue.studentYear}/{issue.studentClass} เลขที่ {issue.studentNumber}
+                      </p>
+                    )}
+                    {issue.latitude && (
+                      <p className="meta">📍 {issue.latitude.toFixed(5)}, {issue.longitude.toFixed(5)}</p>
+                    )}
+                    {issue.progressImageUrl && (
+                      <img src={issue.progressImageUrl} alt="กำลังซ่อม" className="thumb" />
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </>
       )}
     </div>

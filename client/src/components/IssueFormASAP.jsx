@@ -53,7 +53,21 @@ const FLOOR_OPTIONS = {
   'อาคารเรียน สธ 10': ['ชั้น 1', 'ชั้น 2', 'ชั้น 3', 'ชั้น 4', 'ชั้น 5', 'ชั้น 6', 'ชั้น 7'],
 };
 
+const MAX_RAW_PHOTO_BYTES = 15 * 1024 * 1024; // 15MB
+ 
+function validateImageFile(selectedFile) {
+  if (!selectedFile.type.startsWith('image/')) {
+    return 'กรุณาเลือกไฟล์รูปภาพเท่านั้น (JPG, PNG)';
+  }
+  if (selectedFile.size > MAX_RAW_PHOTO_BYTES) {
+    return 'ไฟล์มีขนาดใหญ่เกินไป (ไม่เกิน 15MB)';
+  }
+  return null;
+}
+ 
+
 export default function IssueFormASAP({ profile, idToken }) {
+  const [topic, setTopic] = useState('');
   const [category, setCategory] = useState('Facilities');
   const [building, setBuilding] = useState('');
   const [floor, setFloor] = useState('');
@@ -64,6 +78,7 @@ export default function IssueFormASAP({ profile, idToken }) {
   const [location, setLocation] = useState({ lat: null, lng: null });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const isClassroomBuilding = BUILDING_LOCATIONS.includes(building);
   const floorChoices = FLOOR_OPTIONS[building] || [];
@@ -91,11 +106,19 @@ export default function IssueFormASAP({ profile, idToken }) {
 
   const handleImageChange = async (e) => {
     const selectedFile = e.target.files[0];
-    if (selectedFile) {
-      const compressed = await compressImage(selectedFile);
-      setFile(compressed);
-      setPreviewUrl(URL.createObjectURL(compressed));
+    if (!selectedFile) return;
+ 
+    const validationError = validateImageFile(selectedFile);
+    if (validationError) {
+      setFieldErrors((prev) => ({ ...prev, photo: validationError }));
+      e.target.value = ''; // reset so re-selecting the same (fixed) file re-fires onChange
+      return;
     }
+    setFieldErrors((prev) => ({ ...prev, photo: null }));
+ 
+    const compressed = await compressImage(selectedFile);
+    setFile(compressed);
+    setPreviewUrl(URL.createObjectURL(compressed));
   };
 
   const handleSubmit = async (e) => {
@@ -118,6 +141,7 @@ export default function IssueFormASAP({ profile, idToken }) {
     const formData = new FormData();
     formData.append('lineIdToken', idToken);
     formData.append('reporterName', profile.displayName);
+    formData.append('topic', topic);
     formData.append('category', category);
     const fullDescription = `สถานที่: ${locationDetail}\nรายละเอียด: ${description}`;
     formData.append('description', fullDescription);
@@ -164,6 +188,19 @@ export default function IssueFormASAP({ profile, idToken }) {
         </div>
 
         <form onSubmit={handleSubmit}>
+
+          <div className="field">
+            <label className="label">เรื่อง</label>
+            <textarea
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              required
+              rows={1}
+              className="input textarea"
+              placeholder="แจ้งปัญหาเรื่อง..."
+            />
+          </div>
+
           <div className="field">
             <label className="label">หมวดหมู่ปัญหา</label>
             <select
@@ -260,11 +297,12 @@ export default function IssueFormASAP({ profile, idToken }) {
               <input
                 type="file"
                 accept="image/*"
-                capture="environment"   // <-- Forces camera, no gallery
+                capture="environment"
                 onChange={handleImageChange}
                 style={{ display: 'none' }}
               />
             </label>
+            {fieldErrors.photo && <p className="field-error">⚠️ {fieldErrors.photo}</p>}
           </div>
 
           <div className="location-box">
