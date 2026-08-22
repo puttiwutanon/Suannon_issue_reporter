@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException, Header
+from fastapi.concurrency import run_in_threadpool
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage,
@@ -16,7 +17,10 @@ async def line_webhook(request: Request, x_line_signature: str = Header(None)):
     logger.info("📨 Webhook received")
     body = await request.body()
     try:
-        handler.handle(body.decode("utf-8"), x_line_signature)
+        # handler.handle() (and the LINE push/reply calls it triggers) is
+        # synchronous — running it directly here would block the event
+        # loop, stalling every other request while LINE's API responds.
+        await run_in_threadpool(handler.handle, body.decode("utf-8"), x_line_signature)
         logger.info("✅ Webhook handled successfully")
     except InvalidSignatureError:
         logger.error("❌ Invalid signature")
@@ -52,18 +56,6 @@ def handle_message(event):
                         uri="https://liff.line.me/2010847048-WMKaotVe?mode=view_mine"
                     )
                 ),
-                QuickReplyButton(
-                    action=URIAction(
-                        label="เรื่องแจ้งจากผู้อื่น",
-                        uri="https://liff.line.me/2010847048-WMKaotVe?mode=view_others"
-                    )
-                ),
-                QuickReplyButton(
-                    action=URIAction(
-                        label="ยกเลิก กลับไปหน้าหลัก",
-                        uri="https://liff.line.me/2010847048-WMKaotVe?mode=home"
-                    )
-                )
             ]
         )
         msg = TextSendMessage(
@@ -88,12 +80,6 @@ def handle_message(event):
                         uri="https://liff.line.me/2010847048-WMKaotVe?mode=form_suggestion"
                     )
                 ),
-                QuickReplyButton(
-                    action=URIAction(
-                        label="ยกเลิก กลับไปหน้าหลัก",
-                        uri="https://liff.line.me/2010847048-WMKaotVe?mode=home"
-                    )
-                )
             ]
         )
         msg = TextSendMessage(

@@ -153,6 +153,7 @@ function IssueDashboard() {
   const [fixFile, setFixFile] = useState(null);
   const [fixPreview, setFixPreview] = useState(null);
   const [fixing, setFixing] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState(null);
 
   // The issue currently open in the fix modal. Derived from `issues`
   // (not a separate snapshot) so its `status` is always fresh right
@@ -197,7 +198,7 @@ function IssueDashboard() {
       const url = `${apiUrl}/api/issues`;
       const token = await getIdToken();
 
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, 'ngrok-skip-browser-warning': 'true' } });
       if (!res.ok) throw new Error('API error: ' + res.status);
 
       const data = await res.json();
@@ -241,7 +242,7 @@ function IssueDashboard() {
 
       const res = await fetch(`${apiUrl}/api/issues/${selectedIssueId}/status`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'ngrok-skip-browser-warning': 'true' },
         body: formData,
       });
       if (!res.ok) throw new Error('Failed to update status: ' + res.status);
@@ -469,12 +470,14 @@ function IssueDashboard() {
       <div className="issues-list">
         <div className="issues-header">
           <h2>📋 รายการแจ้งทั้งหมด ({filteredIssues.length})</h2>
-          <button 
+          <a
             className="pdf-report-btn"
-            onClick={handleGoToReports}
+            href="https://docs.google.com/spreadsheets/d/1S82k8JYz4J7QipyhS-RYPGkCRLmUY-Dn2nzkhF4DiN0/edit?usp=sharing"
+            target="_blank"
+            rel="noopener noreferrer"
           >
             📄 รายงาน PDF
-          </button>
+          </a>
         </div>
         {filteredIssues.length === 0 ? (
           <div className="empty-state">ไม่มีรายการที่ตรงกับเงื่อนไข</div>
@@ -506,7 +509,15 @@ function IssueDashboard() {
                 <div className="issue-body">
                   <p className="issue-description">{issue.description}</p>
                   {issue.imageUrl && (
-                    <img src={issue.imageUrl} alt="Issue" className="issue-thumbnail" />
+                    <img
+                      src={issue.imageUrl}
+                      alt="Issue"
+                      className="issue-thumbnail clickable-image"
+                      onClick={(e) => {
+                        e.stopPropagation(); // don't also trigger the card's onClick (opens selectedIssue modal)
+                        setLightboxImage(issue.imageUrl);
+                      }}
+                    />
                   )}
                 </div>
                 
@@ -562,12 +573,22 @@ function IssueDashboard() {
               <p><strong>📍 ตำแหน่ง:</strong> {selectedIssue.latitude}, {selectedIssue.longitude}</p>
             )}
             {selectedIssue.imageUrl && (
-              <img src={selectedIssue.imageUrl} alt="Issue" className="modal-image" />
+              <img
+                src={selectedIssue.imageUrl}
+                alt="Issue"
+                className="modal-image clickable-image"
+                onClick={() => setLightboxImage(selectedIssue.imageUrl)}
+              />
             )}
             {selectedIssue.progressImageUrl && (
               <>
                 <p><strong>📸 ภาพระหว่างดำเนินการซ่อม:</strong></p>
-                <img src={selectedIssue.progressImageUrl} alt="Fix in progress" className="modal-image" />
+                <img
+                  src={selectedIssue.progressImageUrl}
+                  alt="Fix in progress"
+                  className="modal-image clickable-image"
+                  onClick={() => setLightboxImage(selectedIssue.progressImageUrl)}
+                />
               </>
             )}
           </div>
@@ -661,6 +682,19 @@ function IssueDashboard() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ---------- Lightbox: tap any photo to see it uncropped ---------- */}
+      {lightboxImage && (
+        <div className="lightbox-overlay" onClick={() => setLightboxImage(null)}>
+          <button className="lightbox-close" onClick={() => setLightboxImage(null)}>✕</button>
+          <img
+            src={lightboxImage}
+            alt="ภาพขยาย"
+            className="lightbox-image"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </div>

@@ -2,6 +2,7 @@ import os
 import uuid
 import boto3
 from fastapi import HTTPException
+from fastapi.concurrency import run_in_threadpool
 from .config import logger
 
 _client = None
@@ -58,3 +59,10 @@ def upload_image(file_obj, folder: str = "school_issues") -> str:
         raise HTTPException(status_code=500, detail="Failed to upload image")
 
     return f"{public_base.rstrip('/')}/{key}"
+
+async def aupload_image(file_obj, folder: str = "school_issues") -> str:
+    """Async wrapper around upload_image(). boto3 is synchronous, so a
+    plain `upload_image()` call inside an async route blocks the event
+    loop for the whole upload — every other request has to wait behind
+    it. This runs it in FastAPI's threadpool instead."""
+    return await run_in_threadpool(upload_image, file_obj, folder)

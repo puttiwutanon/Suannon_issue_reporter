@@ -115,3 +115,60 @@
     color: #06C755;
   }
 }
+
+// Marks any thumbnail as tappable — hover/press feedback so it's
+// obvious the image expands, since it otherwise looks static.
+.clickable-image {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+ 
+  &:hover {
+    opacity: 0.85;
+  }
+  &:active {
+    opacity: 0.7;
+  }
+}
+ 
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000; // above your existing .modal-overlay
+  padding: 24px;
+  cursor: zoom-out;
+}
+ 
+.lightbox-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain; // shows the WHOLE photo, unlike a cover-cropped thumbnail
+  border-radius: 4px;
+  cursor: default;
+}
+ 
+.lightbox-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+ 
+  &:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+}

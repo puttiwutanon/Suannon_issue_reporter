@@ -1,9 +1,12 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, Request, UploadFile, File, Form, HTTPException, status, Query
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, Request, UploadFile, File, Form,
+    HTTPException, status,
+)
 from linebot.models import TextSendMessage, ImageSendMessage
 from ..firebase_auth import require_admin
 from ..line_auth import verify_line_id_token
-from ..config import logger
+from ..config import logger, now_th
 from .. import db
 from .. import r2_client
 from .. import sheets_client
@@ -49,10 +52,87 @@ def _validate_image_upload(upload_file, max_bytes: int = 8 * 1024 * 1024):
     upload_file.file.seek(0)
 
 
+# ---------- Notification helpers (run as background tasks) ----------
+# LINE pushes and the Sheets log are both "fire and forget" from the
+# caller's point of view — the HTTP response should not wait on either
+# of them. Wrapping them as background_tasks.add_task(...) means
+# FastAPI runs them (in a worker thread, since they're sync) *after*
+# the response has already been sent, instead of blocking the request
+# on a LINE API round-trip or a multi-call Sheets update.
+def _notify_acknowledged(line_user_id: str, topic: str, category: str, description: str):
+    try:
+        line_bot_api.push_message(
+            to=line_user_id,
+            messages=TextSendMessage(
+                text=(
+                    f"📨 ทีมงานได้รับเรื่องแจ้ง: {topic} ของคุณแล้ว และกำลังดำเนินการอยู่ครับ\n\n"
+                    f"📋 ประเภท: {category}\n"
+                    f"📝 รายละเอียด: {description}\n\n"
+                    f"กรุณารอสักครู่นะครับ 🙏"
+                )
+            ),
+        )
+        logger.info(f"✅ 'acknowledged' notification sent to {line_user_id}")
+    except Exception as e:
+        logger.error(f"❌ LINE push error: {e}", exc_info=True)
+
+
+def _notify_in_progress(line_user_id: str, topic: str, progress_image_url: str):
+    try:
+        line_bot_api.push_message(
+            to=line_user_id,
+            messages=[
+                TextSendMessage(text=f"🔧 ทีมงานกำลังดำเนินการซ่อมแซมเรื่อง: {topic}\nที่คุณแจ้งอยู่ครับ"),
+                ImageSendMessage(
+                    original_content_url=progress_image_url,
+                    preview_image_url=progress_image_url,
+                ),
+            ],
+        )
+        logger.info(f"✅ 'in_progress' notification sent to {line_user_id}")
+    except Exception as e:
+        logger.error(f"❌ LINE push error: {e}", exc_info=True)
+
+
+def _notify_resolved(line_user_id: str, topic: str, category: str, description: str, fix_image_url: Optional[str]):
+    try:
+        messages = [
+            TextSendMessage(
+                text=(
+                    f"✅ เรื่องแจ้ง: {topic} ได้รับการแก้ไขแล้ว!\n\n"
+                    f"📋 ประเภท: {category}\n"
+                    f"📝 รายละเอียด: {description}\n\n"
+                    f"ขอบคุณที่ช่วยทำให้โรงเรียนของเราดีขึ้นครับ 🙏"
+                )
+            )
+        ]
+        if fix_image_url:
+            messages.append(
+                ImageSendMessage(
+                    original_content_url=fix_image_url,
+                    preview_image_url=fix_image_url,
+                )
+            )
+        line_bot_api.push_message(to=line_user_id, messages=messages)
+        logger.info(f"✅ 'resolved' notification sent to {line_user_id}")
+    except Exception as e:
+        logger.error(f"❌ LINE push error: {e}", exc_info=True)
+
+
+def _log_created_to_sheets(new_row: dict):
+    # Best-effort — never blocks the reporter if Sheets is down.
+    sheets_client.append_issue_row(new_row)
+
+
+def _log_resolved_to_sheets(issue_id: int, resolved_at: str, fix_image_url: Optional[str]):
+    # Best-effort — never blocks the resolve action if Sheets is down.
+    sheets_client.mark_issue_resolved(issue_id, resolved_at, fix_image_url)
+
+
 # ---------- GET /api/issues (Admin Only) ----------
 @router.get("/issues")
 async def get_issues(admin=Depends(require_admin)):
-    rows = db.fetch_all("SELECT * FROM issues ORDER BY created_at DESC")
+    rows = await db.afetch_all("SELECT * FROM issues ORDER BY created_at DESC")
     issues = [_row_to_issue(row) for row in rows]
     return {"success": True, "issues": issues}
 
@@ -64,12 +144,12 @@ async def get_community_issues(
     line_user=Depends(verify_line_id_token)
 ):
     if view_mode == "mine":
-        rows = db.fetch_all(
+        rows = await db.afetch_all(
             "SELECT * FROM issues WHERE line_user_id = ? ORDER BY created_at DESC",
             [line_user["userId"]]
         )
     else:
-        rows = db.fetch_all(
+        rows = await db.afetch_all(
             "SELECT * FROM issues WHERE line_user_id != ? ORDER BY created_at DESC",
             [line_user["userId"]]
         )
@@ -98,13 +178,14 @@ ALLOWED_TRANSITIONS = {
 @router.post("/issues/{issue_id}/status", status_code=status.HTTP_200_OK)
 async def update_issue_status(
     issue_id: int,
+    background_tasks: BackgroundTasks,
     status_value: str = Form(..., alias="status"),
     image: Optional[UploadFile] = File(None),
     admin=Depends(require_admin),
 ):
     logger.info(f"🔄 Updating issue {issue_id} status -> {status_value}")
 
-    row = db.fetch_one("SELECT * FROM issues WHERE id = ?", [issue_id])
+    row = await db.afetch_one("SELECT * FROM issues WHERE id = ?", [issue_id])
     if not row:
         raise HTTPException(status_code=404, detail="Issue not found")
 
@@ -118,32 +199,16 @@ async def update_issue_status(
         )
 
     line_user_id = row["line_user_id"]
-    reporter_name = row["reporter_name"]
     topic = row["topic"]
     category = row["category"]
     description = row["description"]
 
     if status_value == "acknowledged":
-        db.execute(
-            "UPDATE issues SET status = 'acknowledged', acknowledged_at = datetime('now') WHERE id = ?",
-            [issue_id],
+        await db.aexecute(
+            "UPDATE issues SET status = 'acknowledged', acknowledged_at = ? WHERE id = ?",
+            [now_th(), issue_id],
         )
-        try:
-            line_bot_api.push_message(
-                to=line_user_id,
-                messages=TextSendMessage(
-                    text=(
-                        f"📨 ทีมงานได้รับเรื่องแจ้ง: {topic} ของคุณแล้ว และกำลังดำเนินการอยู่ครับ\n\n"
-                        f"📋 ประเภท: {category}\n"
-                        f"📝 รายละเอียด: {description}\n\n"
-                        f"กรุณารอสักครู่นะครับ 🙏"
-                    )
-                ),
-            )
-            logger.info(f"✅ 'acknowledged' notification sent to {line_user_id}")
-        except Exception as e:
-            logger.error(f"❌ LINE push error: {e}", exc_info=True)
-
+        background_tasks.add_task(_notify_acknowledged, line_user_id, topic, category, description)
         return {"success": True, "message": "Issue acknowledged", "status": "acknowledged"}
 
     if status_value == "in_progress":
@@ -152,7 +217,7 @@ async def update_issue_status(
         try:
             _validate_image_upload(image)
             logger.info(f"📤 Uploading progress image to R2: {image.filename}")
-            progress_image_url = r2_client.upload_image(image.file, folder="school_issues/progress")
+            progress_image_url = await r2_client.aupload_image(image.file, folder="school_issues/progress")
             logger.info(f"✅ Progress image uploaded: {progress_image_url}")
         except HTTPException:
             raise
@@ -160,25 +225,12 @@ async def update_issue_status(
             logger.error(f"❌ R2 error: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to upload progress image")
 
-        db.execute(
+        await db.aexecute(
             "UPDATE issues SET status = 'in_progress', progress_image_url = ?, "
-            "in_progress_at = datetime('now') WHERE id = ?",
-            [progress_image_url, issue_id],
+            "in_progress_at = ? WHERE id = ?",
+            [progress_image_url, now_th(), issue_id],
         )
-        try:
-            line_bot_api.push_message(
-                to=line_user_id,
-                messages=[
-                    TextSendMessage(text=f"🔧 ทีมงานกำลังดำเนินการซ่อมแซมเรื่อง: {topic}\nที่คุณแจ้งอยู่ครับ"),
-                    ImageSendMessage(
-                        original_content_url=progress_image_url,
-                        preview_image_url=progress_image_url,
-                    ),
-                ],
-            )
-            logger.info(f"✅ 'in_progress' notification sent to {line_user_id}")
-        except Exception as e:
-            logger.error(f"❌ LINE push error: {e}", exc_info=True)
+        background_tasks.add_task(_notify_in_progress, line_user_id, topic, progress_image_url)
 
         return {
             "success": True,
@@ -193,7 +245,7 @@ async def update_issue_status(
             try:
                 _validate_image_upload(image)
                 logger.info(f"📤 Uploading final fix image to R2: {image.filename}")
-                fix_image_url = r2_client.upload_image(image.file, folder="school_issues/fixed")
+                fix_image_url = await r2_client.aupload_image(image.file, folder="school_issues/fixed")
                 logger.info(f"✅ Final fix image uploaded: {fix_image_url}")
             except HTTPException:
                 raise
@@ -201,38 +253,14 @@ async def update_issue_status(
                 logger.error(f"❌ R2 error: {e}", exc_info=True)
                 raise HTTPException(status_code=500, detail="Failed to upload final fix image")
 
-        result = db.execute(
-            "UPDATE issues SET status = 'resolved', fix_image_url = ?, resolved_at = datetime('now') "
+        result = await db.aexecute(
+            "UPDATE issues SET status = 'resolved', fix_image_url = ?, resolved_at = ? "
             "WHERE id = ? RETURNING resolved_at",
-            [fix_image_url, issue_id],
+            [fix_image_url, now_th(), issue_id],
         )
 
-        # Best-effort — updates the permanent log so it reflects the
-        # outcome, but never blocks the resolve action if Sheets is down.
-        sheets_client.mark_issue_resolved(issue_id, result["resolved_at"], fix_image_url)
-
-        try:
-            messages = [
-                TextSendMessage(
-                    text=(
-                        f"✅ เรื่องแจ้ง: {topic} ได้รับการแก้ไขแล้ว!\n\n"
-                        f"📋 ประเภท: {category}\n"
-                        f"📝 รายละเอียด: {description}\n\n"
-                        f"ขอบคุณที่ช่วยทำให้โรงเรียนของเราดีขึ้นครับ 🙏"
-                    )
-                )
-            ]
-            if fix_image_url:
-                messages.append(
-                    ImageSendMessage(
-                        original_content_url=fix_image_url,
-                        preview_image_url=fix_image_url,
-                    )
-                )
-            line_bot_api.push_message(to=line_user_id, messages=messages)
-            logger.info(f"✅ 'resolved' notification sent to {line_user_id}")
-        except Exception as e:
-            logger.error(f"❌ LINE push error: {e}", exc_info=True)
+        background_tasks.add_task(_log_resolved_to_sheets, issue_id, result["resolved_at"], fix_image_url)
+        background_tasks.add_task(_notify_resolved, line_user_id, topic, category, description, fix_image_url)
 
         return {
             "success": True,
@@ -246,99 +274,11 @@ async def update_issue_status(
     raise HTTPException(status_code=400, detail=f"Unknown status: {status_value}")
 
 
-# ---------- POST /api/issues/{issue_id}/resolve (superseded by /status) ----------
-# Kept only for backward compatibility with anything still calling it
-# directly — the dashboard now calls POST /issues/{issue_id}/status instead.
-@router.post("/issues/{issue_id}/resolve", status_code=status.HTTP_200_OK)
-async def resolve_issue(
-    issue_id: int,
-    fix_image: UploadFile = File(...),
-    admin=Depends(require_admin),
-):
-    logger.info(f"🔧 Resolving issue ID: {issue_id}")
-
-    MAX_IMAGE_BYTES = 8 * 1024 * 1024
-
-    def _validate_image(upload_file):
-        if not upload_file.content_type or not upload_file.content_type.startswith("image/"):
-            raise HTTPException(status_code=400, detail="Invalid file type")
-        contents = upload_file.file.read()
-        if len(contents) > MAX_IMAGE_BYTES:
-            raise HTTPException(status_code=400, detail="Image too large")
-        upload_file.file.seek(0)
-
-    try:
-        _validate_image(fix_image)
-        logger.info(f"📤 Uploading fix image to R2: {fix_image.filename}")
-        fix_image_url = r2_client.upload_image(fix_image.file, folder="school_issues/fixed")
-        logger.info(f"✅ Fix image uploaded: {fix_image_url}")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ R2 error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to upload fix image")
-
-    try:
-        query = """
-            UPDATE issues
-            SET status = 'resolved',
-                fix_image_url = ?,
-                resolved_at = datetime('now')
-            WHERE id = ?
-            RETURNING line_user_id, reporter_name, topic, category, description, resolved_at;
-        """
-        result = db.execute(query, [fix_image_url, issue_id])
-        if not result:
-            raise HTTPException(status_code=404, detail="Issue not found")
-
-        line_user_id = result["line_user_id"]
-        reporter_name = result["reporter_name"]
-        category = result["category"]
-        description = result["description"]
-        topic = result["topic"]
-        # Best-effort — updates the permanent log so it reflects the
-        # outcome, but never blocks the resolve action if Sheets is down.
-        sheets_client.mark_issue_resolved(issue_id, result["resolved_at"], fix_image_url)
-
-        try:
-            text_msg = TextSendMessage(
-                text=(
-                    f"✅ เรื่องแจ้ง: {topic} ได้รับการแก้ไขแล้ว!\n\n"
-                    f"📋 ประเภท: {category}\n"
-                    f"📝 รายละเอียด: {description}\n\n"
-                    f"ขอบคุณที่ช่วยทำให้โรงเรียนของเราดีขึ้นครับ 🙏"
-                )
-            )
-
-            image_msg = ImageSendMessage(
-                original_content_url=fix_image_url,
-                preview_image_url=fix_image_url
-            )
-
-            line_bot_api.push_message(
-                to=line_user_id,
-                messages=[text_msg, image_msg]
-            )
-            logger.info(f"✅ LINE notification with image sent to {line_user_id}")
-        except Exception as e:
-            logger.error(f"❌ LINE push error: {e}", exc_info=True)
-
-        return {
-            "success": True,
-            "message": "Issue resolved and notification sent",
-            "fixImageUrl": fix_image_url
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Resolve error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 # ---------- POST /api/issues ----------
 @router.post("/issues", status_code=status.HTTP_201_CREATED)
 async def create_issue(
     request: Request,
+    background_tasks: BackgroundTasks,
     lineIdToken: str = Form(...),
     reporterName: Optional[str] = Form(None),
     topic: str = Form(...),
@@ -364,21 +304,11 @@ async def create_issue(
     logger.info(f"📝 Student: {studentYear}/{studentClass}/{studentNumber}")
 
     image_url = None
-    MAX_IMAGE_BYTES = 8 * 1024 * 1024
-
-    def _validate_image(upload_file):
-        if not upload_file.content_type or not upload_file.content_type.startswith("image/"):
-            raise HTTPException(status_code=400, detail="Invalid file type")
-        contents = upload_file.file.read()
-        if len(contents) > MAX_IMAGE_BYTES:
-            raise HTTPException(status_code=400, detail="Image too large")
-        upload_file.file.seek(0)
-
     if image:
-        _validate_image(image)
+        _validate_image_upload(image)
         try:
             logger.info(f"📤 Uploading image to R2: {image.filename}")
-            image_url = r2_client.upload_image(image.file, folder="school_issues")
+            image_url = await r2_client.aupload_image(image.file, folder="school_issues")
             logger.info(f"✅ Image uploaded: {image_url}")
         except HTTPException:
             raise
@@ -390,8 +320,9 @@ async def create_issue(
         query = """
             INSERT INTO issues
             (line_user_id, reporter_name, topic, category, description, image_url,
-             latitude, longitude, student_year, student_class, student_number, issue_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             latitude, longitude, student_year, student_class, student_number, issue_type,
+             created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id, line_user_id, reporter_name, topic, category, description,
                       image_url, latitude, longitude, status, created_at,
                       student_year, student_class, student_number, issue_type;
@@ -399,30 +330,29 @@ async def create_issue(
         values = [
             lineUserId, reporterName, topic, category, description, image_url,
             latitude, longitude, studentYear, studentClass, studentNumber,
-            issue_type
+            issue_type, now_th()
         ]
 
-        logger.info(f"💾 Inserting issue into database...")
-        new_row = db.execute(query, values)
+        logger.info("💾 Inserting issue into database...")
+        new_row = await db.aexecute(query, values)
         logger.info(f"✅ Issue inserted with ID: {new_row['id']}")
 
-        # Best-effort permanent log — never blocks the reporter if Sheets is down.
-        sheets_client.append_issue_row(new_row)
+        background_tasks.add_task(_log_created_to_sheets, new_row)
 
-        try:
-            if issue_type == 'suggestion':
-                msg_text = "✅ ส่งข้อเสนอแนะสำเร็จแล้ว!\nขอบคุณที่ช่วยพัฒนาโรงเรียนของเรา 🙏"
-            else:
-                msg_text = "✅ แจ้งปัญหาสำเร็จแล้ว!\nทีมงานจะแจ้งให้ทราบอีกครั้งเมื่อเรื่องที่แจ้งถึงมือช่าง 🛠️"
+        if issue_type == 'suggestion':
+            msg_text = "✅ ส่งข้อเสนอแนะสำเร็จแล้ว!\nขอบคุณที่ช่วยพัฒนาโรงเรียนของเรา 🙏"
+        else:
+            msg_text = "✅ แจ้งปัญหาสำเร็จแล้ว!\nทีมงานจะแจ้งให้ทราบอีกครั้งเมื่อเรื่องที่แจ้งถึงมือช่าง 🛠️"
 
-            logger.info(f"📤 Sending LINE confirmation to: {lineUserId}")
-            line_bot_api.push_message(
-                to=lineUserId,
-                messages=TextSendMessage(text=msg_text)
-            )
-            logger.info("✅ LINE confirmation sent")
-        except Exception as e:
-            logger.error(f"❌ LINE push error: {e}", exc_info=True)
+        def _send_created_confirmation():
+            try:
+                logger.info(f"📤 Sending LINE confirmation to: {lineUserId}")
+                line_bot_api.push_message(to=lineUserId, messages=TextSendMessage(text=msg_text))
+                logger.info("✅ LINE confirmation sent")
+            except Exception as e:
+                logger.error(f"❌ LINE push error: {e}", exc_info=True)
+
+        background_tasks.add_task(_send_created_confirmation)
 
         return {
             "success": True,

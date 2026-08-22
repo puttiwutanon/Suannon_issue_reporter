@@ -1,6 +1,7 @@
 import os
 import httpx
 from fastapi import HTTPException
+from fastapi.concurrency import run_in_threadpool
 from .config import logger
 
 D1_QUERY_URL = (
@@ -62,3 +63,14 @@ def execute(sql: str, params: list | tuple | None = None) -> dict | None:
     returns the first returned row as a dict; otherwise returns None."""
     rows = _run(sql, params)
     return rows[0] if rows else None
+
+
+# ---------- Async wrappers ----------
+async def afetch_all(sql: str, params: list | tuple | None = None) -> list[dict]:
+    return await run_in_threadpool(fetch_all, sql, params)
+
+async def afetch_one(sql: str, params: list | tuple | None = None) -> dict | None:
+    return await run_in_threadpool(fetch_one, sql, params)
+
+async def aexecute(sql: str, params: list | tuple | None = None) -> dict | None:
+    return await run_in_threadpool(execute, sql, params)

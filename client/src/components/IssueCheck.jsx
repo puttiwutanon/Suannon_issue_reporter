@@ -109,6 +109,7 @@ export default function IssueCheck({ profile, viewMode, idToken }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [mapKey, setMapKey] = useState(0);
+  const [lightboxImage, setLightboxImage] = useState(null);
 
   const locatedIssues = useMemo(
     () => issues.filter(issue => issue.latitude && issue.longitude),
@@ -277,7 +278,12 @@ export default function IssueCheck({ profile, viewMode, idToken }) {
                 </div>
                 <div className="card-body">
                   {issue.imageUrl && (
-                    <img src={issue.imageUrl} alt="issue" className="thumb" />
+                    <img
+                      src={issue.imageUrl}
+                      alt="issue"
+                      className="thumb clickable-image"
+                      onClick={() => setLightboxImage(issue.imageUrl)}
+                    />
                   )}
                   <div className="card-content">
                     <p className="desc">{issue.description}</p>
@@ -293,7 +299,12 @@ export default function IssueCheck({ profile, viewMode, idToken }) {
                       <p className="meta">📍 {issue.latitude.toFixed(5)}, {issue.longitude.toFixed(5)}</p>
                     )}
                     {issue.progressImageUrl && (
-                      <img src={issue.progressImageUrl} alt="กำลังซ่อม" className="thumb" />
+                      <img
+                        src={issue.progressImageUrl}
+                        alt="กำลังซ่อม"
+                        className="thumb clickable-image"
+                        onClick={() => setLightboxImage(issue.progressImageUrl)}
+                      />
                     )}
                   </div>
                 </div>
@@ -301,6 +312,18 @@ export default function IssueCheck({ profile, viewMode, idToken }) {
             );
           })}
         </>
+      )}
+
+      {lightboxImage && (
+        <div className="lightbox-overlay" onClick={() => setLightboxImage(null)}>
+          <button className="lightbox-close" onClick={() => setLightboxImage(null)}>✕</button>
+          <img
+            src={lightboxImage}
+            alt="ภาพขยาย"
+            className="lightbox-image"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
       )}
     </div>
   );

@@ -1,8 +1,9 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, EVENT_JOB_MISSED
+from datetime import datetime, timedelta
 
-from .config import logger
+from .config import logger, TH_TZ
 from . import db
 
 scheduler = BackgroundScheduler()
@@ -19,13 +20,14 @@ def delete_old_resolved_issues():
     """
     logger.info("🧹 Running scheduled cleanup: deleting old resolved issues")
     try:
+        cutoff = (datetime.now(TH_TZ) - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S")
         query = """
             DELETE FROM issues
             WHERE status = 'resolved'
-              AND resolved_at < datetime('now', '-4 days')
+              AND resolved_at < ?
             RETURNING id;
         """
-        deleted = db.fetch_all(query)
+        deleted = db.fetch_all(query, [cutoff])
         if deleted:
             logger.info(f"🗑️ Deleted {len(deleted)} old resolved issues")
         else:
