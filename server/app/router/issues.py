@@ -33,6 +33,7 @@ def _row_to_issue(row: dict):
         "studentYear": row.get("student_year"),
         "studentClass": row.get("student_class"),
         "studentNumber": row.get("student_number"),
+        "contactNumber": row.get("contact_number"),
         "issueType": row.get("issue_type"),
         "fixImageUrl": row.get("fix_image_url"),
         "resolvedAt": row.get("resolved_at"),
@@ -280,16 +281,17 @@ async def create_issue(
     request: Request,
     background_tasks: BackgroundTasks,
     lineIdToken: str = Form(...),
-    reporterName: Optional[str] = Form(None),
+    reporterName: str = Form(None),
     topic: str = Form(...),
     category: str = Form(...),
     description: str = Form(...),
     latitude: Optional[float] = Form(None),
     longitude: Optional[float] = Form(None),
     image: Optional[UploadFile] = File(None),
-    studentYear: Optional[str] = Form(None),
-    studentClass: Optional[str] = Form(None),
-    studentNumber: Optional[str] = Form(None),
+    studentYear: str = Form(None),
+    studentClass: str = Form(None),
+    studentNumber: str = Form(None),
+    contactNumber: str = Form(None),
     issue_type: Optional[str] = Form('urgent'),
 ):
     # Verify LINE token
@@ -302,6 +304,25 @@ async def create_issue(
     logger.info(f"📝 POST /api/issues - User: {lineUserId}, Type: {issue_type}, Topic: {topic}, Category: {category}")
     logger.info(f"📝 Reporter: {reporterName}, Description length: {len(description) if description else 0}")
     logger.info(f"📝 Student: {studentYear}/{studentClass}/{studentNumber}")
+
+    if issue_type == 'urgent':
+        missing = [
+            name for name, val in [
+                ("reporterName", reporterName),
+                ("topic", topic),
+                ("category", category),
+                ("description", description),
+                ("studentYear", studentYear),
+                ("studentClass", studentClass),
+                ("studentNumber", studentNumber),
+                ("contactNumber", contactNumber),
+            ] if not val or not val.strip()
+        ]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required field(s) for urgent report: {', '.join(missing)}",
+            )
 
     image_url = None
     if image:
@@ -320,16 +341,16 @@ async def create_issue(
         query = """
             INSERT INTO issues
             (line_user_id, reporter_name, topic, category, description, image_url,
-             latitude, longitude, student_year, student_class, student_number, issue_type,
+             latitude, longitude, student_year, student_class, student_number, contact_number, issue_type,
              created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id, line_user_id, reporter_name, topic, category, description,
                       image_url, latitude, longitude, status, created_at,
-                      student_year, student_class, student_number, issue_type;
+                      student_year, student_class, student_number, contact_number, issue_type;
         """
         values = [
             lineUserId, reporterName, topic, category, description, image_url,
-            latitude, longitude, studentYear, studentClass, studentNumber,
+            latitude, longitude, studentYear, studentClass, studentNumber, contactNumber,
             issue_type, now_th()
         ]
 

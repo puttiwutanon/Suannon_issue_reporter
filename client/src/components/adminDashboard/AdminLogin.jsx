@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { doSignInWithEmailAndPassword } from '../../firebase/auth.js';
 import '../styles/AdminLoginStyle.scss';
+import logo from '../../assets/skn_1 (2).png';
 
 function AdminLogin() {
   const [email, setEmail] = useState('');
@@ -36,7 +37,7 @@ function AdminLogin() {
     <div className="admin-login-container">
       <div className="login-card">
         <div className="login-header">
-          <div className="logo"><img src="/src/assets/skn_1 (2).png" alt="" width="150" height="150" /></div>
+          <div className="logo"><img src={logo} alt="" width="150" height="150" /></div>
           <h1>SKN Issue Reporter</h1>
           <p>แผงควบคุมผู้ดูแลระบบ</p>
         </div>

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # ---------- CORS ----------
 if ENV == "production":
     CORS_ORIGINS = [
-        "https://your-admin-dashboard-domain.com",
+        "https://skn-issue-reporter-client-692173962169.asia-southeast1.run.app",
         "https://liff.line.me",
     ]
 else:

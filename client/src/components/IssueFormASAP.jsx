@@ -79,6 +79,12 @@ export default function IssueFormASAP({ profile, idToken }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [year, setYear] = useState('');
+  const [studentClass, setStudentClass] = useState('');
+  const [studentNumber, setStudentNumber] = useState('');
+  const [contactNumber, setContactNumber] = useState('');
 
   const isClassroomBuilding = BUILDING_LOCATIONS.includes(building);
   const floorChoices = FLOOR_OPTIONS[building] || [];
@@ -140,7 +146,10 @@ export default function IssueFormASAP({ profile, idToken }) {
 
     const formData = new FormData();
     formData.append('lineIdToken', idToken);
-    formData.append('reporterName', profile.displayName);
+    formData.append('reporterName', `${firstName} ${lastName}`);
+    formData.append('studentYear', year);
+    formData.append('studentClass', studentClass);
+    formData.append('studentNumber', studentNumber);
     formData.append('topic', topic);
     formData.append('category', category);
     const fullDescription = `สถานที่: ${locationDetail}\nรายละเอียด: ${description}`;
@@ -150,7 +159,7 @@ export default function IssueFormASAP({ profile, idToken }) {
     if (location.lat) formData.append('latitude', location.lat);
     if (location.lng) formData.append('longitude', location.lng);
     if (file) formData.append('image', file);
-
+    formData.append('contactNumber', contactNumber);
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       console.log('📤 Sending to:', apiUrl);
@@ -188,6 +197,79 @@ export default function IssueFormASAP({ profile, idToken }) {
         </div>
 
         <form onSubmit={handleSubmit}>
+
+          <div className="row">
+            <div className="col">
+              <label className="label">ชื่อ</label>
+              <input
+                type="text"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                required
+                className="input"
+                placeholder="ชื่อ"
+              />
+            </div>
+            <div className="col">
+              <label className="label">นามสกุล</label>
+              <input
+                type="text"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                required
+                className="input"
+                placeholder="นามสกุล"
+              />
+            </div>
+          </div>
+
+          <div className="row">
+            <div className="col">
+              <label className="label">ชั้นปี</label>
+              <input
+                type="text"
+                value={year}
+                onChange={(e) => setYear(e.target.value)}
+                required
+                className="input"
+                placeholder="เช่น ม.4"
+              />
+            </div>
+            <div className="col">
+              <label className="label">ห้อง</label>
+              <input
+                type="text"
+                value={studentClass}
+                onChange={(e) => setStudentClass(e.target.value)}
+                required
+                className="input"
+                placeholder="เช่น 5"
+              />
+            </div>
+            <div className="col small">
+              <label className="label">เลขที่</label>
+              <input
+                type="text"
+                value={studentNumber}
+                onChange={(e) => setStudentNumber(e.target.value)}
+                required
+                className="input"
+                placeholder="เลขที่"
+              />
+            </div>
+          </div>
+
+          <div className="field">
+            <label className="label">เบอร์โทรติดต่อ</label>
+            <textarea
+              value={contactNumber}
+              onChange={(e) => setContactNumber(e.target.value)}
+              required
+              rows={1}
+              className="input textarea"
+              placeholder="เบอร์โทรติดต่อ"
+            />
+          </div>
 
           <div className="field">
             <label className="label">เรื่อง</label>

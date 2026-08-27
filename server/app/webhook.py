@@ -70,7 +70,7 @@ def handle_message(event):
             items=[
                 QuickReplyButton(
                     action=URIAction(
-                        label="แจ้งปัญหาเพื่อแก้ไขด่วน",
+                        label="แจ้งปัญหาเพื่อแก้ไข",
                         uri="https://liff.line.me/2010847048-WMKaotVe?mode=form_urgent"
                     )
                 ),

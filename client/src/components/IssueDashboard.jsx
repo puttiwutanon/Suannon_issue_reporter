@@ -194,7 +194,7 @@ function IssueDashboard() {
 
   const fetchIssues = useCallback(async () => {
     try {
-      const apiUrl = 'http://localhost:8000';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const url = `${apiUrl}/api/issues`;
       const token = await getIdToken();
 
@@ -234,7 +234,7 @@ function IssueDashboard() {
 
     setFixing(true);
     try {
-      const apiUrl = 'http://localhost:8000';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const token = await getIdToken();
       const formData = new FormData();
       formData.append('status', nextStatus);
@@ -277,10 +277,13 @@ function IssueDashboard() {
   }, [fetchIssues]);
 
   const filteredIssues = useMemo(() => {
-    return issues.filter(issue => {
+    const result = issues.filter(issue => {
       if (filter === 'urgent' && issue.issueType !== 'urgent') return false;
       if (filter === 'suggestion' && issue.issueType !== 'suggestion') return false;
-      
+      if (filter === 'pending' && issue.status !== 'pending') return false;
+      if (filter === 'resolved' && issue.status !== 'resolved') return false;
+      if (filter === 'acknowledged' && issue.status !== 'acknowledged') return false;
+      if (filter === 'in_progress' && issue.status !== 'in_progress') return false;
       if (searchTerm) {
         const search = searchTerm.toLowerCase();
         return (
@@ -289,8 +292,13 @@ function IssueDashboard() {
           issue.category?.toLowerCase().includes(search)
         );
       }
-      
       return true;
+    });
+
+    return [...result].sort((a, b) => {
+      const aResolved = a.status === 'resolved' ? 1 : 0;
+      const bResolved = b.status === 'resolved' ? 1 : 0;
+      return aResolved - bResolved;
     });
   }, [issues, filter, searchTerm]);
 
@@ -353,7 +361,7 @@ function IssueDashboard() {
         </div>
         <div className="stat-card urgent">
           <div className="stat-number">{stats.urgent}</div>
-          <div className="stat-label">🚨 ด่วน</div>
+          <div className="stat-label">🚨 แจ้งปัญหา</div>
         </div>
         <div className="stat-card suggestion">
           <div className="stat-number">{stats.suggestion}</div>
@@ -382,13 +390,41 @@ function IssueDashboard() {
             className={`filter-btn urgent ${filter === 'urgent' ? 'active' : ''}`}
             onClick={() => setFilter('urgent')}
           >
-            🚨 ด่วน
+            🚨 ปัญหา
           </button>
           <button 
             className={`filter-btn suggestion ${filter === 'suggestion' ? 'active' : ''}`}
             onClick={() => setFilter('suggestion')}
           >
             💡 ข้อเสนอแนะ
+          </button>
+
+          <button 
+            className={`filter-btn pending ${filter === 'pending' ? 'active' : ''}`}
+            onClick={() => setFilter('pending')}
+          >
+            ⏳ รอดำเนินการ
+          </button>
+
+          <button 
+            className={`filter-btn in_progress ${filter === 'in_progress' ? 'active' : ''}`}
+            onClick={() => setFilter('in_progress')}
+          >
+            🕒 กำลังดำเนินการ
+          </button>
+
+          <button 
+            className={`filter-btn acknowledged ${filter === 'acknowledged' ? 'active' : ''}`}
+            onClick={() => setFilter('acknowledged')}
+          >
+            🕒 รับเรื่องแล้ว
+          </button>
+
+          <button 
+            className={`filter-btn resolved ${filter === 'resolved' ? 'active' : ''}`}
+            onClick={() => setFilter('resolved')}
+          >
+            ✅ เสร็จสิ้น
           </button>
         </div>
         <div className="search-box">
@@ -476,7 +512,7 @@ function IssueDashboard() {
             target="_blank"
             rel="noopener noreferrer"
           >
-            📄 รายงาน PDF
+            📄 รายงานทั้งหมด
           </a>
         </div>
         {filteredIssues.length === 0 ? (
@@ -494,7 +530,7 @@ function IssueDashboard() {
                   <div className="issue-badge">
                     {issue.issueType === 'suggestion' ? '💡' : '🚨'}
                     <span className={`type-badge ${issue.issueType}`}>
-                      {issue.issueType === 'suggestion' ? 'ข้อเสนอแนะ' : 'แจ้งด่วน'}
+                      {issue.issueType === 'suggestion' ? 'ข้อเสนอแนะ' : 'แจ้งปัญหา'}
                     </span>
                   </div>
                   <div className="issue-meta">
@@ -526,6 +562,11 @@ function IssueDashboard() {
                   {issue.studentYear && (
                     <span className="student-info">
                       ชั้น {issue.studentYear}/{issue.studentClass} เลขที่ {issue.studentNumber}
+                    </span>
+                  )}
+                  {issue.contactNumber && (
+                    <span className="contact">
+                      📞 {issue.contactNumber}
                     </span>
                   )}
                   <span className="date">
@@ -561,7 +602,7 @@ function IssueDashboard() {
             <button className="modal-close" onClick={() => setSelectedIssue(null)}>✕</button>
             <h3>{selectedIssue.category}</h3>
             <h3>{selectedIssue.topic}</h3>
-            <p><strong>ประเภท:</strong> {selectedIssue.issueType === 'suggestion' ? 'ข้อเสนอแนะ' : 'แจ้งด่วน'}</p>
+            <p><strong>ประเภท:</strong> {selectedIssue.issueType === 'suggestion' ? 'ข้อเสนอแนะ' : 'แจ้งปัญหา'}</p>
             <p><strong>รายละเอียด:</strong> {selectedIssue.description}</p>
             <p><strong>ผู้แจ้ง:</strong> {selectedIssue.reporterName}</p>
             {selectedIssue.studentYear && (
