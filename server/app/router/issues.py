@@ -40,6 +40,7 @@ def _row_to_issue(row: dict):
         "progressImageUrl": row.get("progress_image_url"),
         "acknowledgedAt": row.get("acknowledged_at"),
         "inProgressAt": row.get("in_progress_at"),
+        "declinedAt": row.get("declined_at"),
         "topic": row.get("topic"),
     }
 
@@ -120,6 +121,24 @@ def _notify_resolved(line_user_id: str, topic: str, category: str, description: 
         logger.error(f"❌ LINE push error: {e}", exc_info=True)
 
 
+def _notify_declined(line_user_id: str, topic: str, category: str, description: str):
+    try:
+        line_bot_api.push_message(
+            to=line_user_id,
+            messages=TextSendMessage(
+                text=(
+                    f"เรื่องแจ้ง: {topic} ไม่สามารถดำเนินการได้ในขณะนี้ครับ\n\n"
+                    f"📋 ประเภท: {category}\n"
+                    f"📝 รายละเอียด: {description}\n\n"
+                    f"ขอบคุณที่แจ้งให้ทราบครับ 🙏"
+                )
+            ),
+        )
+        logger.info(f"✅ 'declined' notification sent to {line_user_id}")
+    except Exception as e:
+        logger.error(f"❌ LINE push error: {e}", exc_info=True)
+
+
 def _log_created_to_sheets(new_row: dict):
     # Best-effort — never blocks the reporter if Sheets is down.
     sheets_client.append_issue_row(new_row)
@@ -175,6 +194,10 @@ ALLOWED_TRANSITIONS = {
     "in_progress": "resolved",
 }
 
+# Declining bypasses the normal step order — allowed from any
+# non-terminal state, not just the "current expected next" one.
+DECLINABLE_STATUSES = {"pending", "acknowledged", "in_progress"}
+
 
 @router.post("/issues/{issue_id}/status", status_code=status.HTTP_200_OK)
 async def update_issue_status(
@@ -191,6 +214,24 @@ async def update_issue_status(
         raise HTTPException(status_code=404, detail="Issue not found")
 
     current_status = row["status"]
+    line_user_id = row["line_user_id"]
+    topic = row["topic"]
+    category = row["category"]
+    description = row["description"]
+
+    if status_value == "declined":
+        if current_status not in DECLINABLE_STATUSES:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot decline an issue that is already '{current_status}'",
+            )
+        await db.aexecute(
+            "UPDATE issues SET status = 'declined', declined_at = ? WHERE id = ?",
+            [now_th(), issue_id],
+        )
+        background_tasks.add_task(_notify_declined, line_user_id, topic, category, description)
+        return {"success": True, "message": "Issue declined", "status": "declined"}
+
     expected_next = ALLOWED_TRANSITIONS.get(current_status)
     if status_value != expected_next:
         raise HTTPException(
@@ -198,11 +239,6 @@ async def update_issue_status(
             detail=f"Cannot move from '{current_status}' to '{status_value}' "
                    f"(expected next status: '{expected_next}')",
         )
-
-    line_user_id = row["line_user_id"]
-    topic = row["topic"]
-    category = row["category"]
-    description = row["description"]
 
     if status_value == "acknowledged":
         await db.aexecute(

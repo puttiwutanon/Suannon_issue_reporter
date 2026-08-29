@@ -34,10 +34,11 @@ L.Icon.Default.mergeOptions({
 // in_progress  -> team is actively fixing, progress photo attached
 // resolved     -> done
 const STATUS_LABELS = {
-  pending: { text: '⏳ รอดำเนินการ', className: 'pending' },
-  acknowledged: { text: '📨 รับเรื่องแล้ว', className: 'acknowledged' },
-  in_progress: { text: '🔧 กำลังซ่อม', className: 'in_progress' },
-  resolved: { text: '✅ เสร็จสิ้น', className: 'resolved' },
+  pending: { text: ' รอดำเนินการ', className: 'pending' },
+  acknowledged: { text: ' รับเรื่องแล้ว', className: 'acknowledged' },
+  in_progress: { text: ' กำลังซ่อม', className: 'in_progress' },
+  resolved: { text: ' เสร็จสิ้น', className: 'resolved' },
+  declined: { text: ' ปฏิเสธ', className: 'declined' },
 };
 function getStatusLabel(status) {
   return STATUS_LABELS[status] || STATUS_LABELS.pending;
@@ -45,11 +46,16 @@ function getStatusLabel(status) {
 
 // Ordered so we can find "how far along" an issue is for the stepper.
 const PROGRESS_STEPS = [
-  { status: 'pending', label: 'รอรับเรื่อง' },
+  { status: 'pending', label: 'รอดำเนินการ' },
   { status: 'acknowledged', label: 'รับเรื่องแล้ว' },
   { status: 'in_progress', label: 'กำลังซ่อม' },
   { status: 'resolved', label: 'เสร็จสิ้น' },
 ];
+
+const STATUS_ORDER = {
+  ...Object.fromEntries(PROGRESS_STEPS.map((s, i) => [s.status, i])),
+  declined: PROGRESS_STEPS.length,
+};
 
 // Component to handle map restrictions and centering
 function MapRestrictions({ bounds, center, zoom, markers }) {
@@ -154,6 +160,7 @@ function IssueDashboard() {
   const [fixPreview, setFixPreview] = useState(null);
   const [fixing, setFixing] = useState(false);
   const [lightboxImage, setLightboxImage] = useState(null);
+  const [dateSort, setDateSort] = useState('latest');
 
   // The issue currently open in the fix modal. Derived from `issues`
   // (not a separate snapshot) so its `status` is always fresh right
@@ -272,8 +279,41 @@ function IssueDashboard() {
     setFixPreview(null);
   };
 
+  const handleDecline = async (issueId) => {
+    if (!window.confirm('ยืนยันปฏิเสธการแก้ไขเรื่องนี้?')) return;
+
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const token = await getIdToken();
+      const formData = new FormData();
+      formData.append('status', 'declined');
+
+      const res = await fetch(`${apiUrl}/api/issues/${issueId}/status`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'ngrok-skip-browser-warning': 'true' },
+        body: formData,
+      });
+      if (!res.ok) throw new Error('Failed to decline: ' + res.status);
+      const data = await res.json();
+      if (!data.success) throw new Error('API returned success: false');
+
+      await fetchIssues();
+    } catch (err) {
+      console.error(err);
+      alert('❌ ไม่สามารถปฏิเสธเรื่องนี้ได้ กรุณาลองใหม่');
+    }
+  };
+
   useEffect(() => {
     fetchIssues();
+
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchIssues();
+      }
+    }, 10000);
+
+    return () => clearInterval(intervalId);
   }, [fetchIssues]);
 
   const filteredIssues = useMemo(() => {
@@ -284,6 +324,7 @@ function IssueDashboard() {
       if (filter === 'resolved' && issue.status !== 'resolved') return false;
       if (filter === 'acknowledged' && issue.status !== 'acknowledged') return false;
       if (filter === 'in_progress' && issue.status !== 'in_progress') return false;
+      if (filter === 'declined' && issue.status !== 'declined') return false;
       if (searchTerm) {
         const search = searchTerm.toLowerCase();
         return (
@@ -295,12 +336,13 @@ function IssueDashboard() {
       return true;
     });
 
-    return [...result].sort((a, b) => {
-      const aResolved = a.status === 'resolved' ? 1 : 0;
-      const bResolved = b.status === 'resolved' ? 1 : 0;
-      return aResolved - bResolved;
-    });
-  }, [issues, filter, searchTerm]);
+  return [...result].sort((a, b) => {
+    const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+    if (statusDiff !== 0) return statusDiff;
+    const diff = new Date(b.createdAt) - new Date(a.createdAt);
+    return dateSort === 'latest' ? diff : -diff;
+  });
+  }, [issues, filter, searchTerm, dateSort]);
 
   const locatedIssues = useMemo(() => {
     return filteredIssues.filter(issue => issue.latitude && issue.longitude);
@@ -342,13 +384,13 @@ function IssueDashboard() {
     <div className="dashboard-container">   
       {/* Header */}
       <div className="dashboard-header">
-        <h1>📊 แผงควบคุมปัญหา</h1>
+        <h1>แผงควบคุมปัญหา</h1>
         <div className="header-actions">
           <button onClick={handleLogout} className="logout-btn">
-            🚪 ออกจากระบบ
+             ออกจากระบบ
           </button>
           <button onClick={() => window.location.reload()} className="refresh-btn">
-            🔄 รีเฟรช
+             รีเฟรช
           </button>
         </div>
       </div>
@@ -361,76 +403,57 @@ function IssueDashboard() {
         </div>
         <div className="stat-card urgent">
           <div className="stat-number">{stats.urgent}</div>
-          <div className="stat-label">🚨 แจ้งปัญหา</div>
+          <div className="stat-label"> แจ้งปัญหา</div>
         </div>
         <div className="stat-card suggestion">
           <div className="stat-number">{stats.suggestion}</div>
-          <div className="stat-label">💡 ข้อเสนอแนะ</div>
+          <div className="stat-label"> ข้อเสนอแนะ</div>
         </div>
         <div className="stat-card pending">
           <div className="stat-number">{stats.pending}</div>
-          <div className="stat-label">⏳ รอดำเนินการ</div>
+          <div className="stat-label"> รอดำเนินการ</div>
         </div>
         <div className="stat-card resolved">
           <div className="stat-number">{stats.resolved}</div>
-          <div className="stat-label">✅ เสร็จสิ้น</div>
+          <div className="stat-label"> เสร็จสิ้น</div>
         </div>
       </div>
 
       {/* Filters & Search */}
       <div className="controls">
-        <div className="filter-buttons">
-          <button 
-            className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
-            onClick={() => setFilter('all')}
+        <div className="filter-controls">
+          <select
+            className="filter-select"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
           >
-            ทั้งหมด
-          </button>
-          <button 
-            className={`filter-btn urgent ${filter === 'urgent' ? 'active' : ''}`}
-            onClick={() => setFilter('urgent')}
-          >
-            🚨 ปัญหา
-          </button>
-          <button 
-            className={`filter-btn suggestion ${filter === 'suggestion' ? 'active' : ''}`}
-            onClick={() => setFilter('suggestion')}
-          >
-            💡 ข้อเสนอแนะ
-          </button>
+            <option value="all">ทั้งหมด</option>
+            <option value="urgent"> ปัญหา</option>
+            <option value="suggestion"> ข้อเสนอแนะ</option>
+            <option value="pending"> รอดำเนินการ</option>
+            <option value="acknowledged"> รับเรื่องแล้ว</option>
+            <option value="in_progress"> กำลังดำเนินการ</option>
+            <option value="resolved"> เสร็จสิ้น</option>
+            <option value="declined"> ปฏิเสธ</option>
+          </select>
 
-          <button 
-            className={`filter-btn pending ${filter === 'pending' ? 'active' : ''}`}
-            onClick={() => setFilter('pending')}
+          <button
+            className={`sort-btn ${dateSort === 'latest' ? 'active' : ''}`}
+            onClick={() => setDateSort('latest')}
           >
-            ⏳ รอดำเนินการ
+             ล่าสุด
           </button>
-
-          <button 
-            className={`filter-btn in_progress ${filter === 'in_progress' ? 'active' : ''}`}
-            onClick={() => setFilter('in_progress')}
+          <button
+            className={`sort-btn ${dateSort === 'oldest' ? 'active' : ''}`}
+            onClick={() => setDateSort('oldest')}
           >
-            🕒 กำลังดำเนินการ
-          </button>
-
-          <button 
-            className={`filter-btn acknowledged ${filter === 'acknowledged' ? 'active' : ''}`}
-            onClick={() => setFilter('acknowledged')}
-          >
-            🕒 รับเรื่องแล้ว
-          </button>
-
-          <button 
-            className={`filter-btn resolved ${filter === 'resolved' ? 'active' : ''}`}
-            onClick={() => setFilter('resolved')}
-          >
-            ✅ เสร็จสิ้น
+             เก่าสุด
           </button>
         </div>
         <div className="search-box">
           <input
             type="text"
-            placeholder="🔍 ค้นหา..."
+            placeholder="ค้นหา..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -481,7 +504,7 @@ function IssueDashboard() {
             >
               <Popup>
                 <div className="popup-content">
-                  <h4>🏫 โรงเรียน</h4>
+                  <h4> โรงเรียน</h4>
                   <p>ที่ตั้งของโรงเรียน</p>
                 </div>
               </Popup>
@@ -497,7 +520,7 @@ function IssueDashboard() {
           </MapContainer>
         ) : (
           <div className="no-location-message">
-            <p>📍 ไม่มีรายการที่มีตำแหน่งที่ตั้ง</p>
+            <p> ไม่มีรายการที่มีตำแหน่งที่ตั้ง</p>
           </div>
         )}
       </div>
@@ -505,14 +528,14 @@ function IssueDashboard() {
       {/* Issues List */}
       <div className="issues-list">
         <div className="issues-header">
-          <h2>📋 รายการแจ้งทั้งหมด ({filteredIssues.length})</h2>
+          <h2> รายการแจ้งทั้งหมด ({filteredIssues.length})</h2>
           <a
             className="pdf-report-btn"
             href="https://docs.google.com/spreadsheets/d/1S82k8JYz4J7QipyhS-RYPGkCRLmUY-Dn2nzkhF4DiN0/edit?usp=sharing"
             target="_blank"
             rel="noopener noreferrer"
           >
-            📄 รายงานทั้งหมด
+             รายงานทั้งหมด
           </a>
         </div>
         {filteredIssues.length === 0 ? (
@@ -535,9 +558,11 @@ function IssueDashboard() {
                   </div>
                   <div className="issue-meta">
                     <span className="category-badge">{issue.category}</span>
-                    <span className={`status-badge ${statusLabel.className}`}>
-                      {statusLabel.text}
-                    </span>
+                    {issue.status !== 'resolved' && issue.issueType === 'urgent' && (
+                      <span className={`status-badge ${statusLabel.className}`}>
+                        {statusLabel.text}
+                      </span>
+                    )}
                   </div>
                 </div>
                 
@@ -558,7 +583,7 @@ function IssueDashboard() {
                 </div>
                 
                 <div className="issue-footer">
-                  <span className="reporter">👤 {issue.reporterName}</span>
+                  <span className="reporter"> {issue.reporterName}</span>
                   {issue.studentYear && (
                     <span className="student-info">
                       ชั้น {issue.studentYear}/{issue.studentClass} เลขที่ {issue.studentNumber}
@@ -566,18 +591,30 @@ function IssueDashboard() {
                   )}
                   {issue.contactNumber && (
                     <span className="contact">
-                      📞 {issue.contactNumber}
+                       {issue.contactNumber}
                     </span>
                   )}
                   <span className="date">
                     {new Date(issue.createdAt).toLocaleString('th-TH')}
                   </span>
                   {issue.latitude && (
-                    <span className="location">📍 มีตำแหน่งที่ตั้ง</span>
+                    <span className="location"> มีตำแหน่งที่ตั้ง</span>
                   )}
 
-                  {issue.status !== 'resolved' && issue.issueType === 'urgent' && (
-                    <button 
+                  {issue.status !== 'resolved' && issue.status !== 'declined' && issue.issueType === 'urgent' && (
+                    <button
+                      className="decline-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDecline(issue.id);
+                      }}
+                    >
+                      ปฏิเสธการแก้ไข
+                    </button>
+                  )}
+
+                  {issue.status !== 'resolved' && issue.status !== 'declined' && issue.issueType === 'urgent' && (
+                    <button
                       className="fix-btn"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -585,7 +622,7 @@ function IssueDashboard() {
                         setShowFixModal(true);
                       }}
                     >
-                      🔧 ดำเนินการ
+                       ดำเนินการ
                     </button>
                   )}
                 </div>
@@ -611,7 +648,7 @@ function IssueDashboard() {
             <p><strong>สถานะ:</strong> {getStatusLabel(selectedIssue.status).text}</p>
             <p><strong>วันที่:</strong> {new Date(selectedIssue.createdAt).toLocaleString('th-TH')}</p>
             {selectedIssue.latitude && (
-              <p><strong>📍 ตำแหน่ง:</strong> {selectedIssue.latitude}, {selectedIssue.longitude}</p>
+              <p><strong> ตำแหน่ง:</strong> {selectedIssue.latitude}, {selectedIssue.longitude}</p>
             )}
             {selectedIssue.imageUrl && (
               <img
