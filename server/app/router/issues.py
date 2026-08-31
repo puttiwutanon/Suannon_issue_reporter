@@ -42,6 +42,7 @@ def _row_to_issue(row: dict):
         "inProgressAt": row.get("in_progress_at"),
         "declinedAt": row.get("declined_at"),
         "topic": row.get("topic"),
+        "declineReason": row.get("decline_reason"),
     }
 
 
@@ -121,15 +122,17 @@ def _notify_resolved(line_user_id: str, topic: str, category: str, description: 
         logger.error(f"❌ LINE push error: {e}", exc_info=True)
 
 
-def _notify_declined(line_user_id: str, topic: str, category: str, description: str):
+def _notify_declined(line_user_id: str, topic: str, category: str, description: str, decline_reason: Optional[str] = None):
     try:
+        reason_line = f"\n📋 เหตุผล: {decline_reason}\n" if decline_reason else "\n"
         line_bot_api.push_message(
             to=line_user_id,
             messages=TextSendMessage(
                 text=(
                     f"เรื่องแจ้ง: {topic} ไม่สามารถดำเนินการได้ในขณะนี้ครับ\n\n"
                     f"📋 ประเภท: {category}\n"
-                    f"📝 รายละเอียด: {description}\n\n"
+                    f"📝 รายละเอียด: {description}\n"
+                    f"{reason_line}"
                     f"ขอบคุณที่แจ้งให้ทราบครับ 🙏"
                 )
             ),
@@ -147,6 +150,10 @@ def _log_created_to_sheets(new_row: dict):
 def _log_resolved_to_sheets(issue_id: int, resolved_at: str, fix_image_url: Optional[str]):
     # Best-effort — never blocks the resolve action if Sheets is down.
     sheets_client.mark_issue_resolved(issue_id, resolved_at, fix_image_url)
+
+def _log_declined_to_sheets(issue_id: int, decline_reason: Optional[str]):
+    # Best-effort — never blocks the decline action if Sheets is down.
+    sheets_client.mark_issue_declined(issue_id, decline_reason)
 
 
 # ---------- GET /api/issues (Admin Only) ----------
@@ -205,6 +212,7 @@ async def update_issue_status(
     background_tasks: BackgroundTasks,
     status_value: str = Form(..., alias="status"),
     image: Optional[UploadFile] = File(None),
+    declineReason: Optional[str] = Form(None),   # ← new
     admin=Depends(require_admin),
 ):
     logger.info(f"🔄 Updating issue {issue_id} status -> {status_value}")
@@ -226,10 +234,11 @@ async def update_issue_status(
                 detail=f"Cannot decline an issue that is already '{current_status}'",
             )
         await db.aexecute(
-            "UPDATE issues SET status = 'declined', declined_at = ? WHERE id = ?",
-            [now_th(), issue_id],
+            "UPDATE issues SET status = 'declined', declined_at = ?, decline_reason = ? WHERE id = ?",
+            [now_th(), declineReason, issue_id],
         )
-        background_tasks.add_task(_notify_declined, line_user_id, topic, category, description)
+        background_tasks.add_task(_log_declined_to_sheets, issue_id, declineReason)   # ← new
+        background_tasks.add_task(_notify_declined, line_user_id, topic, category, description, declineReason)
         return {"success": True, "message": "Issue declined", "status": "declined"}
 
     expected_next = ALLOWED_TRANSITIONS.get(current_status)
@@ -240,34 +249,30 @@ async def update_issue_status(
                    f"(expected next status: '{expected_next}')",
         )
 
-    if status_value == "acknowledged":
-        await db.aexecute(
-            "UPDATE issues SET status = 'acknowledged', acknowledged_at = ? WHERE id = ?",
-            [now_th(), issue_id],
-        )
-        background_tasks.add_task(_notify_acknowledged, line_user_id, topic, category, description)
-        return {"success": True, "message": "Issue acknowledged", "status": "acknowledged"}
-
     if status_value == "in_progress":
-        if not image:
-            raise HTTPException(status_code=400, detail="Progress image is required")
-        try:
-            _validate_image_upload(image)
-            logger.info(f"📤 Uploading progress image to R2: {image.filename}")
-            progress_image_url = await r2_client.aupload_image(image.file, folder="school_issues/progress")
-            logger.info(f"✅ Progress image uploaded: {progress_image_url}")
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"❌ R2 error: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Failed to upload progress image")
+        progress_image_url = None
+        if image:
+            try:
+                _validate_image_upload(image)
+                logger.info(f"📤 Uploading progress image to R2: {image.filename}")
+                progress_image_url = await r2_client.aupload_image(image.file, folder="school_issues/progress")
+                logger.info(f"✅ Progress image uploaded: {progress_image_url}")
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"❌ R2 error: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail="Failed to upload progress image")
 
         await db.aexecute(
             "UPDATE issues SET status = 'in_progress', progress_image_url = ?, "
             "in_progress_at = ? WHERE id = ?",
             [progress_image_url, now_th(), issue_id],
         )
-        background_tasks.add_task(_notify_in_progress, line_user_id, topic, progress_image_url)
+
+        if progress_image_url:
+            background_tasks.add_task(_notify_in_progress, line_user_id, topic, progress_image_url)
+        else:
+            background_tasks.add_task(_notify_acknowledged, line_user_id, topic, category, description)
 
         return {
             "success": True,

@@ -32,6 +32,7 @@ COL_ID = 1
 COL_STATUS = 9
 COL_FIX_IMAGE_URL = 15
 COL_RESOLVED_AT = 16
+COL_DECLINE_REASON = 18
 
 _worksheet = None
 
@@ -84,6 +85,7 @@ def append_issue_row(issue: dict):
                 issue.get("fix_image_url"),
                 issue.get("resolved_at"),
                 issue.get("contact_number"),
+                issue.get("decline_reason")
             ],
             value_input_option="USER_ENTERED",
         )
@@ -107,5 +109,22 @@ def mark_issue_resolved(issue_id: int, resolved_at: str, fix_image_url: str):
         ws.update_cell(cell.row, COL_FIX_IMAGE_URL, fix_image_url)
         ws.update_cell(cell.row, COL_RESOLVED_AT, resolved_at)
         logger.info(f"📊 Updated issue {issue_id} in Google Sheets as resolved")
+    except Exception as e:
+        logger.error(f"❌ Failed to update issue in Google Sheets: {e}", exc_info=True)
+
+def mark_issue_declined(issue_id: int, decline_reason: str):
+    """Best-effort: update an existing row's status once declined,
+    so the permanent log reflects the outcome, not just the report."""
+    ws = _get_worksheet()
+    if ws is None:
+        return
+    try:
+        cell = ws.find(str(issue_id), in_column=COL_ID)
+        if cell is None:
+            logger.warning(f"⚠️ Issue {issue_id} not found in Sheets log — skipping update")
+            return
+        ws.update_cell(cell.row, COL_STATUS, "declined")
+        ws.update_cell(cell.row, COL_DECLINE_REASON, decline_reason)
+        logger.info(f"📊 Updated issue {issue_id} in Google Sheets as declined")
     except Exception as e:
         logger.error(f"❌ Failed to update issue in Google Sheets: {e}", exc_info=True)

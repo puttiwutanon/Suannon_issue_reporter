@@ -161,6 +161,9 @@ function IssueDashboard() {
   const [fixing, setFixing] = useState(false);
   const [lightboxImage, setLightboxImage] = useState(null);
   const [dateSort, setDateSort] = useState('latest');
+  const [showDeclineModal, setShowDeclineModal] = useState(false);
+  const [declineReason, setDeclineReason] = useState('');
+  const [declining, setDeclining] = useState(false);
 
   // The issue currently open in the fix modal. Derived from `issues`
   // (not a separate snapshot) so its `status` is always fresh right
@@ -196,6 +199,44 @@ function IssueDashboard() {
     if (file) {
       setFixFile(file);
       setFixPreview(URL.createObjectURL(file));
+    }
+  };
+
+  const handleCloseDeclineModal = () => {
+    setShowDeclineModal(false);
+    setSelectedIssueId(null);
+    setDeclineReason('');
+  };
+
+  const handleDeclineSubmit = async () => {
+    if (!declineReason.trim()) {
+      alert('กรุณาระบุเหตุผลในการปฏิเสธ');
+      return;
+    }
+    setDeclining(true);
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const token = await getIdToken();
+      const formData = new FormData();
+      formData.append('status', 'declined');
+      formData.append('declineReason', declineReason);
+
+      const res = await fetch(`${apiUrl}/api/issues/${selectedIssueId}/status`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'ngrok-skip-browser-warning': 'true' },
+        body: formData,
+      });
+      if (!res.ok) throw new Error('Failed to decline: ' + res.status);
+      const data = await res.json();
+      if (!data.success) throw new Error('API returned success: false');
+
+      await fetchIssues();
+      handleCloseDeclineModal();
+    } catch (err) {
+      console.error(err);
+      alert('❌ ไม่สามารถปฏิเสธเรื่องนี้ได้ กรุณาลองใหม่');
+    } finally {
+      setDeclining(false);
     }
   };
 
@@ -306,14 +347,6 @@ function IssueDashboard() {
 
   useEffect(() => {
     fetchIssues();
-
-    const intervalId = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        fetchIssues();
-      }
-    }, 10000);
-
-    return () => clearInterval(intervalId);
   }, [fetchIssues]);
 
   const filteredIssues = useMemo(() => {
@@ -568,7 +601,7 @@ function IssueDashboard() {
                 
                 {issue.topic && <div className="issue-topic">เรื่อง: {issue.topic}</div>}
                 <div className="issue-body">
-                  <p className="issue-description">{issue.description}</p>
+                  <p className="issue-description">{issue.description}</p>                 
                   {issue.imageUrl && (
                     <img
                       src={issue.imageUrl}
@@ -581,6 +614,10 @@ function IssueDashboard() {
                     />
                   )}
                 </div>
+
+                  {issue.status == 'declined' && issue.issueType === 'urgent' && (
+                    <p className="issue-description">เหตุผล: {issue.declineReason}</p>
+                  )} 
                 
                 <div className="issue-footer">
                   <span className="reporter"> {issue.reporterName}</span>
@@ -603,18 +640,6 @@ function IssueDashboard() {
 
                   {issue.status !== 'resolved' && issue.status !== 'declined' && issue.issueType === 'urgent' && (
                     <button
-                      className="decline-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDecline(issue.id);
-                      }}
-                    >
-                      ปฏิเสธการแก้ไข
-                    </button>
-                  )}
-
-                  {issue.status !== 'resolved' && issue.status !== 'declined' && issue.issueType === 'urgent' && (
-                    <button
                       className="fix-btn"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -623,6 +648,21 @@ function IssueDashboard() {
                       }}
                     >
                        ดำเนินการ
+                    </button>
+                  )}
+                </div>
+
+                <div className="issue-footer">
+                  {issue.status !== 'resolved' && issue.status !== 'declined' && issue.issueType === 'urgent' && (
+                    <button
+                      className="decline-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedIssueId(issue.id);   // same pattern as the fix-btn — fixIssue derives from this
+                        setShowDeclineModal(true);
+                      }}
+                    >
+                      ปฏิเสธการแก้ไข
                     </button>
                   )}
                 </div>
@@ -645,6 +685,7 @@ function IssueDashboard() {
             {selectedIssue.studentYear && (
               <p><strong>นักเรียน:</strong> ชั้น {selectedIssue.studentYear}/{selectedIssue.studentClass} เลขที่ {selectedIssue.studentNumber}</p>
             )}
+            <p><strong>เบอร์ติดต่อ:</strong> {selectedIssue.contactNumber}</p>
             <p><strong>สถานะ:</strong> {getStatusLabel(selectedIssue.status).text}</p>
             <p><strong>วันที่:</strong> {new Date(selectedIssue.createdAt).toLocaleString('th-TH')}</p>
             {selectedIssue.latitude && (
@@ -669,6 +710,35 @@ function IssueDashboard() {
                 />
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {showDeclineModal && fixIssue && (
+        <div className="modal-overlay" onClick={handleCloseDeclineModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={handleCloseDeclineModal}>✕</button>
+            <h3>ปฏิเสธการแก้ไข</h3>
+            <p className="issue-summary">{fixIssue.description}</p>
+
+            <div className="decline-step-body">
+              <label htmlFor="declineReasonInput">เหตุผลในการปฏิเสธ</label>
+              <textarea
+                id="declineReasonInput"
+                className="decline-reason-input"
+                rows={4}
+                placeholder="เช่น ไม่อยู่ในความรับผิดชอบของทีมงาน, ซ้ำกับเรื่องที่แจ้งไปแล้ว..."
+                value={declineReason}
+                onChange={(e) => setDeclineReason(e.target.value)}
+              />
+              <button
+                onClick={handleDeclineSubmit}
+                disabled={declining || !declineReason.trim()}
+                className="fix-btn decline-confirm-btn"
+              >
+                {declining ? 'กำลังส่ง...' : 'ยืนยันการปฏิเสธ'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -711,7 +781,19 @@ function IssueDashboard() {
 
             {fixIssue.status === 'acknowledged' && (
               <div className="fix-step-body">
-                <p>อัปโหลดภาพระหว่างดำเนินการซ่อม แล้วยืนยันว่าทีมงานเริ่มซ่อมแล้ว</p>
+                <p>กดยืนยันเพื่อแจ้งให้ผู้แจ้งทราบว่ากำลังดำเนินการแก้ปัญหา</p>
+                <button
+                  onClick={() => handleAdvanceStatus('in_progress', { requireImage: false })}
+                  disabled={fixing}
+                  className="fix-btn"
+                >
+                  {fixing ? 'กำลังส่ง...' : 'เริ่มดำเนินการ'}
+                </button>
+              </div>
+            )}
+
+            {fixIssue.status === 'in_progress' && (
+              <div className="fix-step-body">
                 <label htmlFor="fixFileInput" className="upload-area fix-upload-area">
                   {fixPreview ? (
                     <img src={fixPreview} alt="Preview" className="fix-preview-image" />
@@ -730,29 +812,10 @@ function IssueDashboard() {
                     id="fixFileInput"
                   />
                 </label>
-                <button
-                  onClick={() => handleAdvanceStatus('in_progress', { requireImage: true })}
-                  disabled={fixing || !fixFile}
-                  className="fix-btn"
-                >
-                  {fixing ? 'กำลังส่ง...' : '🔧 เริ่มดำเนินการซ่อม'}
-                </button>
-              </div>
-            )}
-
-            {fixIssue.status === 'in_progress' && (
-              <div className="fix-step-body">
-                {(fixPreview || fixIssue.progressImageUrl) && (
-                  <img
-                    src={fixPreview || fixIssue.progressImageUrl}
-                    alt="Fix in progress"
-                    className="fix-preview-image"
-                  />
-                )}
                 <p>ทีมงานกำลังดำเนินการซ่อม เมื่อซ่อมเสร็จให้กดยืนยันด้านล่าง</p>
                 <button
-                  onClick={() => handleAdvanceStatus('resolved')}
-                  disabled={fixing}
+                  onClick={() => handleAdvanceStatus('resolved', { requireImage: true })}
+                  disabled={fixing || !fixFile}
                   className="fix-btn resolve"
                 >
                   {fixing ? 'กำลังส่ง...' : '✅ ยืนยันว่าซ่อมเสร็จสมบูรณ์'}
