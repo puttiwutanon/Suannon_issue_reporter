@@ -146,14 +146,9 @@ def _log_created_to_sheets(new_row: dict):
     # Best-effort — never blocks the reporter if Sheets is down.
     sheets_client.append_issue_row(new_row)
 
-
-def _log_resolved_to_sheets(issue_id: int, resolved_at: str, fix_image_url: Optional[str]):
-    # Best-effort — never blocks the resolve action if Sheets is down.
-    sheets_client.mark_issue_resolved(issue_id, resolved_at, fix_image_url)
-
-def _log_declined_to_sheets(issue_id: int, decline_reason: Optional[str]):
-    # Best-effort — never blocks the decline action if Sheets is down.
-    sheets_client.mark_issue_declined(issue_id, decline_reason)
+def _log_status_to_sheets(issue_id: int, new_status: str, **kwargs):
+    # Best-effort — never blocks the status-update action if Sheets is down.
+    sheets_client.update_issue_status(issue_id, new_status, **kwargs)
 
 
 # ---------- GET /api/issues (Admin Only) ----------
@@ -237,7 +232,7 @@ async def update_issue_status(
             "UPDATE issues SET status = 'declined', declined_at = ?, decline_reason = ? WHERE id = ?",
             [now_th(), declineReason, issue_id],
         )
-        background_tasks.add_task(_log_declined_to_sheets, issue_id, declineReason)   # ← new
+        background_tasks.add_task(_log_status_to_sheets, issue_id, "declined", decline_reason=declineReason)
         background_tasks.add_task(_notify_declined, line_user_id, topic, category, description, declineReason)
         return {"success": True, "message": "Issue declined", "status": "declined"}
 
@@ -248,6 +243,20 @@ async def update_issue_status(
             detail=f"Cannot move from '{current_status}' to '{status_value}' "
                    f"(expected next status: '{expected_next}')",
         )
+
+    if status_value == "acknowledged":
+        await db.aexecute(
+            "UPDATE issues SET status = 'acknowledged', acknowledged_at = ? WHERE id = ?",
+            [now_th(), issue_id],
+        )
+        background_tasks.add_task(_log_status_to_sheets, issue_id, "acknowledged")
+        background_tasks.add_task(_notify_acknowledged, line_user_id, topic, category, description)
+
+        return {
+            "success": True,
+            "message": "Issue acknowledged",
+            "status": "acknowledged",
+        }
 
     if status_value == "in_progress":
         progress_image_url = None
@@ -269,6 +278,7 @@ async def update_issue_status(
             [progress_image_url, now_th(), issue_id],
         )
 
+        background_tasks.add_task(_log_status_to_sheets, issue_id, "in_progress")
         if progress_image_url:
             background_tasks.add_task(_notify_in_progress, line_user_id, topic, progress_image_url)
         else:
@@ -301,7 +311,7 @@ async def update_issue_status(
             [fix_image_url, now_th(), issue_id],
         )
 
-        background_tasks.add_task(_log_resolved_to_sheets, issue_id, result["resolved_at"], fix_image_url)
+        background_tasks.add_task(_log_status_to_sheets, issue_id, "resolved", resolved_at=result["resolved_at"], fix_image_url=fix_image_url)
         background_tasks.add_task(_notify_resolved, line_user_id, topic, category, description, fix_image_url)
 
         return {
