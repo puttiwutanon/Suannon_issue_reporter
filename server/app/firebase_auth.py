@@ -14,11 +14,17 @@ if not firebase_admin._apps:
     })
     firebase_admin.initialize_app(cred)
 
-async def require_admin(authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing admin token")
-    token = authorization.split(" ", 1)[1]
+async def verify_admin_token(token: str):
+    """Verify a raw Firebase ID token string. Shared by require_admin
+    (header-based, for normal routes) and the SSE stream route (query-param
+    based, since EventSource can't send custom headers)."""
     try:
         return await run_in_threadpool(firebase_auth.verify_id_token, token)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired admin token")
+
+async def require_admin(authorization: str = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing admin token")
+    token = authorization.split(" ", 1)[1]
+    return await verify_admin_token(token)

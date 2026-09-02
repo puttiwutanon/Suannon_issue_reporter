@@ -1,10 +1,13 @@
+import asyncio
 from typing import Optional
 from fastapi import (
     APIRouter, BackgroundTasks, Depends, Request, UploadFile, File, Form,
     HTTPException, status,
 )
+from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse
 from linebot.models import TextSendMessage, ImageSendMessage
-from ..firebase_auth import require_admin
+from ..firebase_auth import require_admin, verify_admin_token
 from ..line_auth import verify_line_id_token
 from ..config import logger, now_th
 from .. import db
@@ -12,6 +15,8 @@ from .. import r2_client
 from .. import sheets_client
 from ..line_client import line_bot_api
 from ..config import limiter
+from ..connection_manager import manager
+
 
 router = APIRouter(prefix="/api", tags=["issues"])
 
@@ -200,6 +205,40 @@ ALLOWED_TRANSITIONS = {
 # non-terminal state, not just the "current expected next" one.
 DECLINABLE_STATUSES = {"pending", "acknowledged", "in_progress"}
 
+@router.get("/issues/stream")
+async def stream_issues(token: str):
+    # EventSource can't send custom headers, so the token comes in as a
+    # query param here instead of the Authorization header your other
+    # admin routes use.
+    await verify_admin_token(token)
+
+    queue = await manager.connect()
+
+    async def event_generator():
+        try:
+            yield ": connected\n\n"
+            while True:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=15)
+                    yield f"data: {payload}\n\n"
+                except asyncio.TimeoutError:
+                    # keeps the connection alive through proxies that kill idle sockets
+                    yield ": heartbeat\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            manager.disconnect(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 
 @router.post("/issues/{issue_id}/status", status_code=status.HTTP_200_OK)
 async def update_issue_status(
@@ -233,6 +272,7 @@ async def update_issue_status(
             [now_th(), declineReason, issue_id],
         )
         background_tasks.add_task(_log_status_to_sheets, issue_id, "declined", decline_reason=declineReason)
+        background_tasks.add_task(manager.broadcast, {"type": "issue_updated", "issueId": issue_id})
         background_tasks.add_task(_notify_declined, line_user_id, topic, category, description, declineReason)
         return {"success": True, "message": "Issue declined", "status": "declined"}
 
@@ -251,6 +291,7 @@ async def update_issue_status(
         )
         background_tasks.add_task(_log_status_to_sheets, issue_id, "acknowledged")
         background_tasks.add_task(_notify_acknowledged, line_user_id, topic, category, description)
+        background_tasks.add_task(manager.broadcast, {"type": "issue_updated", "issueId": issue_id})
 
         return {
             "success": True,
@@ -283,7 +324,7 @@ async def update_issue_status(
             background_tasks.add_task(_notify_in_progress, line_user_id, topic, progress_image_url)
         else:
             background_tasks.add_task(_notify_acknowledged, line_user_id, topic, category, description)
-
+        background_tasks.add_task(manager.broadcast, {"type": "issue_updated", "issueId": issue_id})
         return {
             "success": True,
             "message": "Issue marked in progress",
@@ -313,7 +354,7 @@ async def update_issue_status(
 
         background_tasks.add_task(_log_status_to_sheets, issue_id, "resolved", resolved_at=result["resolved_at"], fix_image_url=fix_image_url)
         background_tasks.add_task(_notify_resolved, line_user_id, topic, category, description, fix_image_url)
-
+        background_tasks.add_task(manager.broadcast, {"type": "issue_updated", "issueId": issue_id})
         return {
             "success": True,
             "message": "Issue resolved and notification sent",
@@ -410,6 +451,7 @@ async def create_issue(
         logger.info(f"✅ Issue inserted with ID: {new_row['id']}")
 
         background_tasks.add_task(_log_created_to_sheets, new_row)
+        background_tasks.add_task(manager.broadcast, {"type": "issue_created", "issueId": new_row["id"]})
 
         if issue_type == 'suggestion':
             msg_text = "✅ ส่งข้อเสนอแนะสำเร็จแล้ว!\nขอบคุณที่ช่วยพัฒนาโรงเรียนของเรา 🙏"

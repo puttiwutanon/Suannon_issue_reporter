@@ -263,6 +263,36 @@ function IssueDashboard() {
     }
   }, []);
 
+  useEffect(() => {
+    fetchIssues();
+  }, [fetchIssues]);
+
+  useEffect(() => {
+    let eventSource;
+    let cancelled = false;
+
+    (async () => {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const token = await getIdToken();
+      if (cancelled) return;
+
+      eventSource = new EventSource(`${apiUrl}/api/issues/stream?token=${encodeURIComponent(token)}`);
+
+      eventSource.onmessage = () => {
+        fetchIssues();
+      };
+
+      eventSource.onerror = (err) => {
+        console.error('SSE connection error:', err);
+      };
+    })();
+
+    return () => {
+      cancelled = true;
+      if (eventSource) eventSource.close();
+    };
+  }, [fetchIssues]);
+
   // Moves an issue to the next status in the flow.
   //   pending -> acknowledged      : no image needed
   //   acknowledged -> in_progress  : requires the "fixing in progress" photo
