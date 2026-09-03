@@ -554,6 +554,24 @@
   }
 }
 
+.inform-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #3B82F6;
+  background: #fff;
+  color: #3B82F6;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-right: 6px;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: #6fa6ffb9;
+  }
+}
+
+
 .status-badge.declined {
   background: #f3f4f6;
   color: #6b7280;

@@ -28,7 +28,7 @@ const OTHER_LOCATIONS = [
   'ศูนย์เกษตรกรรม',
   'บ้านพักครู/บุคลากร',
   'ประตูด้านหลัง',
-  'สระน้ำ',
+  'สระบัว',
   'สระว่ายน้ำ',
   'ลานจอดรถ',
   'Suannon music studio',
@@ -72,6 +72,7 @@ export default function IssueFormASAP({ profile, idToken }) {
   const [building, setBuilding] = useState('');
   const [floor, setFloor] = useState('');
   const [roomDetail, setRoomDetail] = useState('');
+  const [otherCategory, setOtherCategory] = useState('');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -88,6 +89,7 @@ export default function IssueFormASAP({ profile, idToken }) {
 
   const isClassroomBuilding = BUILDING_LOCATIONS.includes(building);
   const floorChoices = FLOOR_OPTIONS[building] || [];
+  const isOtherCategory = category === 'Others';
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -130,6 +132,11 @@ export default function IssueFormASAP({ profile, idToken }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    let finalCategory = category;
+    if (category === 'Others' && otherCategory.trim()) {
+      finalCategory = otherCategory.trim(); // Or combine: `Others - ${otherCategory.trim()}`
+    }
+
     // Belt-and-suspenders: `required` on the selects covers most cases,
     // but classroom buildings also need a floor picked.
     if (isClassroomBuilding && !floor) {
@@ -151,7 +158,7 @@ export default function IssueFormASAP({ profile, idToken }) {
     formData.append('studentClass', studentClass);
     formData.append('studentNumber', studentNumber);
     formData.append('topic', topic);
-    formData.append('category', category);
+    formData.append('category', finalCategory);
     const fullDescription = `สถานที่: ${locationDetail}\nรายละเอียด: ${description}`;
     formData.append('description', fullDescription);
     formData.append('issue_type', 'urgent');
@@ -272,6 +279,34 @@ export default function IssueFormASAP({ profile, idToken }) {
           </div>
 
           <div className="field">
+            <label className="label">หมวดหมู่ปัญหา</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="input"
+            >
+              <option value="Facilities">อาคารสถานที่ (ยังไม่ให้บริการในขั้นตอนการทดลองแอปครั้งที่ 1)</option>
+              <option value="Electrical">ระบบไฟฟ้า (ยังไม่ให้บริการในขั้นตอนการทดลองแอปครั้งที่ 1)</option>
+              <option value="Plumbing">ระบบน้ำ (ยังไม่ให้บริการในขั้นตอนการทดลองแอปครั้งที่ 1)</option>
+              <option value="Telecommunications">ระบบโทรศัพท์ภายใน (ยังไม่ให้บริการในขั้นตอนการทดลองแอปครั้งที่ 1)</option>
+              <option value="Facilities">อุปกรณ์ภายในห้องเรียน (ประตู/หน้าต่าง/พัดลม ฯลฯ) (ยังไม่ให้บริการในขั้นตอนการทดลองแอปครั้งที่ 1)</option>
+              <option value="Cleanliness">ความสะอาด</option>
+              <option value="Others">อื่นๆ / others</option>
+            </select>
+          </div>
+
+          {isOtherCategory && (
+              <input
+                type="text"
+                value={otherCategory}
+                onChange={(e) => setOtherCategory(e.target.value)}
+                className="input"
+                style={{ marginTop: '8px' }}
+                placeholder="ระบุหมวดหมู่ปัญหาอื่นๆ (ถ้ามี)"
+              />
+          )} 
+
+          <div className="field">
             <label className="label">เรื่อง</label>
             <textarea
               value={topic}
@@ -281,20 +316,6 @@ export default function IssueFormASAP({ profile, idToken }) {
               className="input textarea"
               placeholder="แจ้งปัญหาเรื่อง..."
             />
-          </div>
-
-          <div className="field">
-            <label className="label">หมวดหมู่ปัญหา</label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="input"
-            >
-              <option value="Facilities">🪑 อาคารสถานที่</option>
-              <option value="Electrical">💡 อุปกรณ์เครื่องใช้ชำรุด</option>
-              <option value="Cleanliness">✨ ความสะอาด</option>
-              <option value="Others"> 🖥️ อื่นๆ / others</option>
-            </select>
           </div>
 
           <div className="field">

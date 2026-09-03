@@ -477,3 +477,50 @@ async def create_issue(
     except Exception as e:
         logger.error(f"❌ Database error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Database insertion error: {str(e)}")
+
+    
+# ---------- POST /api/issues/{issue_id}/inform ----------
+@router.post("/issues/{issue_id}/inform", status_code=status.HTTP_200_OK)
+async def inform_reporter(
+    issue_id: int,
+    background_tasks: BackgroundTasks,
+    informMessage: str = Form(...),
+    admin=Depends(require_admin),
+):
+    """Send a custom inform message to the reporter (no status change)."""
+    logger.info(f"📤 Admin inform on issue {issue_id}")
+
+    row = await db.afetch_one("SELECT * FROM issues WHERE id = ?", [issue_id])
+    if not row:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    line_user_id = row["line_user_id"]
+    topic = row["topic"]
+    category = row["category"]
+    description = row["description"]
+
+    # Send the inform message
+    def _send_inform():
+        try:
+            line_bot_api.push_message(
+                to=line_user_id,
+                messages=TextSendMessage(
+                    text=(
+                        f"📢 แจ้งข้อมูลจากทีมงาน\n\n"
+                        f"เรื่อง: {topic}\n"
+                        f"หมวดหมู่: {category}\n"
+                        f"รายละเอียด: {description}\n\n"
+                        f"📝 {informMessage}\n\n"
+                        f"ขอบคุณครับ 🙏"
+                    )
+                ),
+            )
+            logger.info(f"✅ Inform message sent to {line_user_id}")
+        except Exception as e:
+            logger.error(f"❌ LINE push error: {e}", exc_info=True)
+
+    background_tasks.add_task(_send_inform)
+    # Optionally broadcast a real‑time event to refresh dashboard (if SSE is used)
+    background_tasks.add_task(manager.broadcast, {"type": "inform_sent", "issueId": issue_id})
+
+    return {"success": True, "message": "Inform message sent"}
