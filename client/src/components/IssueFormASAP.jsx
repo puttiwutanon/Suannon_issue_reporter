@@ -68,7 +68,7 @@ function validateImageFile(selectedFile) {
 
 export default function IssueFormASAP({ profile, idToken }) {
   const [topic, setTopic] = useState('');
-  const [category, setCategory] = useState('Facilities');
+  const [category, setCategory] = useState('Cleanliness');
   const [building, setBuilding] = useState('');
   const [floor, setFloor] = useState('');
   const [roomDetail, setRoomDetail] = useState('');
@@ -265,6 +265,10 @@ export default function IssueFormASAP({ profile, idToken }) {
               />
             </div>
           </div>
+
+            <p style={{ color: '#6B7280', fontSize: '14px' }}>
+              หากคุณไม่ใช่นักเรียน ให้ขีดฆ่าช่องชั้นปี ห้อง และเลขที่
+            </p>
 
           <div className="field">
             <label className="label">เบอร์โทรติดต่อ</label>
