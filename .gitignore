@@ -13,5 +13,5 @@ dist/
 build/
 push_and_redeploy_commands.txt*
 sa-key.json*
-ssh-keygen -t puttiwutanon25112552
-ssh-keygen -t puttiwutanon25112552.pub
+ssh-keygen -t puttiwutanon25112552*
+ssh-keygen -t puttiwutanon25112552.pub*
