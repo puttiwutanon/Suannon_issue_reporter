@@ -85,7 +85,8 @@ def append_issue_row(issue: dict):
                 issue.get("fix_image_url"),
                 issue.get("resolved_at"),
                 issue.get("contact_number"),
-                issue.get("decline_reason")
+                issue.get("decline_reason"),
+                issue.get("user_status")
             ],
             value_input_option="USER_ENTERED",
         )

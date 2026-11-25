@@ -461,6 +461,15 @@ function IssueDashboard() {
     );
   }
 
+  const getUserStatusLabel = (status) => {
+    const labels = {
+      students: 'นักเรียน',
+      school_staff: 'บุคลากรโรงเรียน',
+      parents: 'ผู้ปกครอง',
+    };
+    return labels[status] || status;
+  };
+
   return (
     <div className="dashboard-container">   
       {/* Header */}
@@ -669,11 +678,11 @@ function IssueDashboard() {
                 
                 <div className="issue-footer">
                   <span className="reporter"> {issue.reporterName}</span>
-                  {issue.studentYear && (
-                    <span className="student-info">
-                      ชั้น {issue.studentYear}/{issue.studentClass} เลขที่ {issue.studentNumber}
-                    </span>
-                  )}
+                    {issue.userStatus && (
+                      <span className="student-info">
+                        สถานะ {getUserStatusLabel(issue.userStatus)}
+                      </span>
+                    )}
                   {issue.contactNumber && (
                     <span className="contact">
                        {issue.contactNumber}
@@ -743,9 +752,9 @@ function IssueDashboard() {
             <p><strong>ประเภท:</strong> {selectedIssue.issueType === 'suggestion' ? 'ข้อเสนอแนะ' : 'แจ้งปัญหา'}</p>
             <p><strong>รายละเอียด:</strong> {selectedIssue.description}</p>
             <p><strong>ผู้แจ้ง:</strong> {selectedIssue.reporterName}</p>
-            {selectedIssue.studentYear && (
-              <p><strong>นักเรียน:</strong> ชั้น {selectedIssue.studentYear}/{selectedIssue.studentClass} เลขที่ {selectedIssue.studentNumber}</p>
-            )}
+                {selectedIssue.userStatus && (
+                  <p><strong>สถานะผู้แจ้ง:</strong> {getUserStatusLabel(selectedIssue.userStatus)}</p>
+                )}
             <p><strong>เบอร์ติดต่อ:</strong> {selectedIssue.contactNumber}</p>
             <p><strong>สถานะ:</strong> {getStatusLabel(selectedIssue.status).text}</p>
             <p><strong>วันที่:</strong> {new Date(selectedIssue.createdAt).toLocaleString('th-TH')}</p>
@@ -885,49 +894,38 @@ function IssueDashboard() {
 
             {fixIssue.status === 'in_progress' && (
               <div className="fix-step-body">
-                {(() => {
-                  const isCleanliness = fixIssue.category === 'Cleanliness';
-                  const requireImageForResolve = !isCleanliness;
-
-                  return (
+                <label htmlFor="fixFileInput" className="upload-area fix-upload-area">
+                  {fixPreview ? (
+                    <img src={fixPreview} alt="Preview" className="fix-preview-image" />
+                  ) : (
                     <>
-                      <label htmlFor="fixFileInput" className="upload-area fix-upload-area">
-                        {fixPreview ? (
-                          <img src={fixPreview} alt="Preview" className="fix-preview-image" />
-                        ) : (
-                          <>
-                            <div className="icon">📷</div>
-                            <p>แตะเพื่อถ่ายรูปหรือเลือกไฟล์</p>
-                          </>
-                        )}
-                        <input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          onChange={handleFixImageChange}
-                          style={{ display: 'none' }}
-                          id="fixFileInput"
-                        />
-                      </label>
-
-                      {isCleanliness && (
-                        <p style={{ color: '#6B7280', fontSize: '14px' }}>
-                          💡 เรื่องความสะอาดไม่ต้องแนบภาพก็ได้ (ไม่บังคับ)
-                        </p>
-                      )}
-
-                      <p>ทีมงานกำลังดำเนินการ เมื่อดำเนินการเสร็จให้กดยืนยันด้านล่าง</p>
-
-                      <button
-                        onClick={() => handleAdvanceStatus('resolved', { requireImage: requireImageForResolve })}
-                        disabled={fixing || (requireImageForResolve && !fixFile)}
-                        className="fix-btn resolve"
-                      >
-                        {fixing ? 'กำลังส่ง...' : '✅ ยืนยันว่าซ่อมเสร็จสมบูรณ์'}
-                      </button>
+                      <div className="icon">📷</div>
+                      <p>แตะเพื่อถ่ายรูปหรือเลือกไฟล์ (ไม่บังคับ)</p>
                     </>
-                  );
-              })()}
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFixImageChange}
+                    style={{ display: 'none' }}
+                    id="fixFileInput"
+                  />
+                </label>
+
+                <p style={{ color: '#6B7280', fontSize: '14px', marginTop: '8px' }}>
+                  💡 การแนบภาพเป็นทางเลือก (ไม่บังคับ)
+                </p>
+
+                <p>ทีมงานกำลังดำเนินการ เมื่อดำเนินการเสร็จให้กดยืนยันด้านล่าง</p>
+
+                <button
+                  onClick={() => handleAdvanceStatus('resolved', { requireImage: false })}
+                  disabled={fixing}
+                  className="fix-btn resolve"
+                >
+                  {fixing ? 'กำลังส่ง...' : '✅ ยืนยันว่าซ่อมเสร็จสมบูรณ์'}
+                </button>
               </div>
             )}
           </div>

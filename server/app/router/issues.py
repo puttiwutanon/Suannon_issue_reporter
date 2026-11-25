@@ -35,9 +35,7 @@ def _row_to_issue(row: dict):
         "longitude": row["longitude"],
         "status": row["status"],
         "createdAt": row["created_at"],
-        "studentYear": row.get("student_year"),
-        "studentClass": row.get("student_class"),
-        "studentNumber": row.get("student_number"),
+        "userStatus": row.get("user_status"),
         "contactNumber": row.get("contact_number"),
         "issueType": row.get("issue_type"),
         "fixImageUrl": row.get("fix_image_url"),
@@ -380,9 +378,7 @@ async def create_issue(
     latitude: Optional[float] = Form(None),
     longitude: Optional[float] = Form(None),
     image: Optional[UploadFile] = File(None),
-    studentYear: str = Form(None),
-    studentClass: str = Form(None),
-    studentNumber: str = Form(None),
+    user_status: str = Form(None),
     contactNumber: str = Form(None),
     issue_type: Optional[str] = Form('urgent'),
 ):
@@ -395,7 +391,7 @@ async def create_issue(
 
     logger.info(f"📝 POST /api/issues - User: {lineUserId}, Type: {issue_type}, Topic: {topic}, Category: {category}")
     logger.info(f"📝 Reporter: {reporterName}, Description length: {len(description) if description else 0}")
-    logger.info(f"📝 Student: {studentYear}/{studentClass}/{studentNumber}")
+    logger.info(f"📝 User Status: {user_status}, Contact: {contactNumber}, Location: ({latitude}, {longitude})")
 
     if issue_type == 'urgent':
         missing = [
@@ -404,9 +400,7 @@ async def create_issue(
                 ("topic", topic),
                 ("category", category),
                 ("description", description),
-                ("studentYear", studentYear),
-                ("studentClass", studentClass),
-                ("studentNumber", studentNumber),
+                ("user_status", user_status),
                 ("contactNumber", contactNumber),
             ] if not val or not val.strip()
         ]
@@ -433,16 +427,16 @@ async def create_issue(
         query = """
             INSERT INTO issues
             (line_user_id, reporter_name, topic, category, description, image_url,
-             latitude, longitude, student_year, student_class, student_number, contact_number, issue_type,
+             latitude, longitude, user_status, contact_number, issue_type,
              created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id, line_user_id, reporter_name, topic, category, description,
                       image_url, latitude, longitude, status, created_at,
-                      student_year, student_class, student_number, contact_number, issue_type;
+                      user_status, contact_number, issue_type;
         """
         values = [
             lineUserId, reporterName, topic, category, description, image_url,
-            latitude, longitude, studentYear, studentClass, studentNumber, contactNumber,
+            latitude, longitude, user_status, contactNumber,
             issue_type, now_th()
         ]
 

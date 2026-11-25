@@ -82,9 +82,7 @@ export default function IssueFormASAP({ profile, idToken }) {
   const [fieldErrors, setFieldErrors] = useState({});
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [year, setYear] = useState('');
-  const [studentClass, setStudentClass] = useState('');
-  const [studentNumber, setStudentNumber] = useState('');
+  const [user_status, setUser_status] = useState('students');
   const [contactNumber, setContactNumber] = useState('');
 
   const isClassroomBuilding = BUILDING_LOCATIONS.includes(building);
@@ -154,9 +152,7 @@ export default function IssueFormASAP({ profile, idToken }) {
     const formData = new FormData();
     formData.append('lineIdToken', idToken);
     formData.append('reporterName', `${firstName} ${lastName}`);
-    formData.append('studentYear', year);
-    formData.append('studentClass', studentClass);
-    formData.append('studentNumber', studentNumber);
+    formData.append('user_status', user_status);
     formData.append('topic', topic);
     formData.append('category', finalCategory);
     const fullDescription = `สถานที่: ${locationDetail}\nรายละเอียด: ${description}`;
@@ -230,45 +226,19 @@ export default function IssueFormASAP({ profile, idToken }) {
             </div>
           </div>
 
-          <div className="row">
-            <div className="col">
-              <label className="label">ชั้นปี</label>
-              <input
-                type="text"
-                value={year}
-                onChange={(e) => setYear(e.target.value)}
-                required
-                className="input"
-                placeholder="เช่น ม.4"
-              />
-            </div>
-            <div className="col">
-              <label className="label">ห้อง</label>
-              <input
-                type="text"
-                value={studentClass}
-                onChange={(e) => setStudentClass(e.target.value)}
-                required
-                className="input"
-                placeholder="เช่น 5"
-              />
-            </div>
-            <div className="col small">
-              <label className="label">เลขที่</label>
-              <input
-                type="text"
-                value={studentNumber}
-                onChange={(e) => setStudentNumber(e.target.value)}
-                required
-                className="input"
-                placeholder="เลขที่"
-              />
-            </div>
+          <div className="field">
+            <label className="label">สถานะผู้ใช้</label>
+            <select
+              value={user_status}
+              onChange={(e) => setUser_status(e.target.value)}
+              className="input"
+            >
+              <option value="students">นักเรียน</option>
+              <option value="school_staff">บุคลากรโรงเรียน</option>
+              <option value="parents">ผู้ปกครอง</option>
+            </select>
           </div>
-
-            <p style={{ color: '#6B7280', fontSize: '14px' }}>
-              หากคุณไม่ใช่นักเรียน ให้ขีดฆ่าช่องชั้นปี ห้อง และเลขที่
-            </p>
+          
 
           <div className="field">
             <label className="label">เบอร์โทรติดต่อ</label>
@@ -289,11 +259,11 @@ export default function IssueFormASAP({ profile, idToken }) {
               onChange={(e) => setCategory(e.target.value)}
               className="input"
             >
-              <option value="Facilities">อาคารสถานที่ (ยังไม่ให้บริการในขั้นตอนการทดลองแอปครั้งที่ 1)</option>
-              <option value="Electrical">ระบบไฟฟ้า (ยังไม่ให้บริการในขั้นตอนการทดลองแอปครั้งที่ 1)</option>
-              <option value="Plumbing">ระบบน้ำ (ยังไม่ให้บริการในขั้นตอนการทดลองแอปครั้งที่ 1)</option>
-              <option value="Telecommunications">ระบบโทรศัพท์ภายใน (ยังไม่ให้บริการในขั้นตอนการทดลองแอปครั้งที่ 1)</option>
-              <option value="Facilities">อุปกรณ์ภายในห้องเรียน (ประตู/หน้าต่าง/พัดลม ฯลฯ) (ยังไม่ให้บริการในขั้นตอนการทดลองแอปครั้งที่ 1)</option>
+              <option value="Facilities">อาคารสถานที่</option>
+              <option value="Electrical">ระบบไฟฟ้า</option>
+              <option value="Plumbing">ระบบน้ำ</option>
+              <option value="Telecommunications">ระบบโทรศัพท์ภายใน</option>
+              <option value="Facilities">อุปกรณ์ภายในห้องเรียน (ประตู/หน้าต่าง/พัดลม ฯลฯ)</option>
               <option value="Cleanliness">ความสะอาด</option>
               <option value="Others">อื่นๆ / others</option>
             </select>
